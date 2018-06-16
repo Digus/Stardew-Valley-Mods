@@ -14,6 +14,7 @@ using PyTK.ContentSync;
 using xTile.Tiles;
 using Microsoft.Xna.Framework.Graphics;
 using xTile;
+using Netcode;
 
 namespace PyTK
 {
@@ -91,7 +92,7 @@ namespace PyTK
             }
         }
 
-        public static void sendRequestToAllFarmers<T>(string address, object request, Action<T> callback, SerializationType serializationType = SerializationType.PLAIN, int timeout = 10000, XmlSerializer xmlSerializer = null)
+        public static void sendRequestToAllFarmers<T>(string address, object request, Action<T> callback, SerializationType serializationType = SerializationType.PLAIN, int timeout = 1000, XmlSerializer xmlSerializer = null)
         {
             foreach (Farmer farmer in Game1.otherFarmers.Values.Where(f => f.isActive() &&  f != Game1.player))
                 Task.Run(() => sendRequestToFarmer(address, request, farmer, callback, serializationType, timeout, xmlSerializer));
@@ -253,6 +254,21 @@ namespace PyTK
                 }
         }
 
+        public static byte[] DecompressBytes(byte[] data)
+        {
+            return Ionic.Zlib.GZipStream.UncompressBuffer(data);
+        }
+
+        public static byte[] CompressStringToBytes(string str)
+        {
+            return Ionic.Zlib.GZipStream.CompressString(str);
+        }
+
+        public static string DecompressString(byte[] str)
+        {
+            return Ionic.Zlib.GZipStream.UncompressString(str);
+        }
+
         public static string CompressBytes(byte[] buffer)
         {
             return Convert.ToBase64String(Ionic.Zlib.GZipStream.CompressBuffer(buffer));
@@ -273,7 +289,7 @@ namespace PyTK
             return Ionic.Zlib.GZipStream.UncompressString(Convert.FromBase64String(str));
         }
 
-        public void warpFarmer(Farmer farmer, string location, int x, int y, bool isStructure = false, int facingAfterWarp = -1)
+        public void WarpFarmer(Farmer farmer, string location, int x, int y, bool isStructure = false, int facingAfterWarp = -1)
         {
             Task.Run(async () =>
            {

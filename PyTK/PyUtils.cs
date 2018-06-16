@@ -1,5 +1,4 @@
-﻿using PyTK.Types;
-using StardewValley;
+﻿using StardewValley;
 using StardewModdingAPI;
 using System;
 using System.Collections.Generic;
@@ -10,8 +9,11 @@ using StardewValley.Buildings;
 using System.Xml;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-using PyTK.Extensions;
-using StardewValley.Network;
+using System.Collections;
+using NCalc;
+using Harmony;
+using System.Reflection;
+using PyTK.Lua;
 
 namespace PyTK
 {
@@ -63,6 +65,8 @@ namespace PyTK
 
             if (conditions.StartsWith("PC "))
                 result = checkPlayerConditions(conditions.Replace("PC ", ""));
+            else if (conditions.StartsWith("LC "))
+                result = checkLuaConditions(conditions.Replace("LC ", ""));
             else
                 result = Helper.Reflection.GetMethod(Game1.currentLocation, "checkEventPrecondition").Invoke<int>("9999999/" + conditions) != -1;
 
@@ -72,6 +76,14 @@ namespace PyTK
         public static bool checkPlayerConditions(string conditions)
         {
             return Helper.Reflection.GetField<bool>(Game1.player, conditions).GetValue();
+        }
+
+        public static bool checkLuaConditions(string conditions)
+        {
+            var script = PyLua.getNewScript();
+            script.Globals["result"] = false;
+            script.DoString("result = (" + conditions + ")");
+            return (bool) script.Globals["result"];
         }
 
         public static List<GameLocation> getAllLocationsAndBuidlings()
@@ -95,7 +107,12 @@ namespace PyTK
 
         public static void loadContentPacks<TModel>(out List<TModel> packs, string folder, SearchOption option = SearchOption.AllDirectories, IMonitor monitor = null, string filesearch = "*.json") where TModel : class
         {
-            packs = new List<TModel>();
+            packs = loadContentPacks<TModel>(folder,option,monitor,filesearch);
+        }
+
+        public static List<TModel> loadContentPacks<TModel>(string folder, SearchOption option = SearchOption.AllDirectories, IMonitor monitor = null, string filesearch = "*.json") where TModel : class
+        {
+            List<TModel>  packs = new List<TModel>();
             string[] files = Directory.GetFiles(folder, filesearch, option);
             foreach (string file in files)
             {
@@ -114,6 +131,8 @@ namespace PyTK
                     }
                 }
             }
+
+            return packs;
         }
 
         public static Type getTypeSDV(string type)
@@ -143,6 +162,13 @@ namespace PyTK
             return getRectangle(1, 1, Color.White);
         }
 
+        public static byte[] BitArrayToByteArray(BitArray bits)
+        {
+            byte[] ret = new byte[(bits.Length - 1) / 8 + 1];
+            bits.CopyTo(ret, 0);
+            return ret;
+        }
+
         internal static void checkAllSaves()
         {
             string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "StardewValley", "Saves");
@@ -166,6 +192,34 @@ namespace PyTK
                     }
                 }
             }
+        }
+
+        public static float calc(string expression, params KeyValuePair<string,object>[] paramters)
+        {
+            Expression e = new Expression(expression);
+
+            foreach (KeyValuePair<string, object> p in paramters)
+                e.Parameters.Add(p.Key, p.Value);
+
+            return float.Parse(e.Evaluate().ToString());
+        }
+
+        public static void initOverride(IModHelper helper, Type type, Type patch, List<string> toPatch)
+        {
+            initOverride(helper.ModRegistry.ModID, type, patch, toPatch);
+        }
+
+
+        public static void initOverride(string harmonyId, Type type, Type patch, List<string> toPatch)
+        {
+            HarmonyInstance harmony = HarmonyInstance.Create("Platonymous.PyTK.PyUtils." + harmonyId);
+            MethodInfo prefix = patch.GetMethods(BindingFlags.Static | BindingFlags.Public).ToList().Find(m => m.Name.ToLower() == "prefix");
+            MethodInfo postfix = patch.GetMethods(BindingFlags.Static | BindingFlags.Public).ToList().Find(m => m.Name.ToLower() == "postfix");
+            List<MethodInfo> originals = type.GetMethods().ToList();
+
+            foreach (MethodInfo method in originals)
+                if (toPatch.Contains(method.Name))
+                    harmony.Patch(method, prefix == null ? null : new HarmonyMethod(prefix), postfix == null ? null : new HarmonyMethod(postfix));
         }
 
     }
