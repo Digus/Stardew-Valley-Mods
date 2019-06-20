@@ -10,6 +10,10 @@ namespace PyTK.Tiled
         public int Width { get; set; }
         public int Height { get; set; }
         public bool Hidden { get; set; }
+        public float Horizontal { get; set; }
+        public float Vertical { get; set; }
+        public float Transparency { get; set; }
+
 
         public List<TiledProperty> Properties { get; set; }
 
@@ -27,6 +31,9 @@ namespace PyTK.Tiled
             Width = elem.Value<int>("@width");
             Height = elem.Value<int>("@height");
             Hidden = (elem.Value<int?>("@visible") ?? 1) == 0;
+            Transparency = elem.Value<float?>("@opacity") ?? 1;
+            Horizontal = elem.Value<float?>("@offsetx") ?? 0;
+            Vertical = elem.Value<float?>("@offsety") ?? 0;
             XElement xelement;
             Properties = (xelement = elem.Element("properties")) != null ? xelement.Elements("property").Select(prop => new TiledProperty(prop)).ToList() : null;
             Data = new TiledLayerData(elem.Element("data"));
@@ -34,11 +41,14 @@ namespace PyTK.Tiled
 
         public XElement ToXml()
         {
-            return new XElement("layer", new object[6]
+            return new XElement("layer", new object[9]
             {
          new XAttribute( "name",  Name),
          new XAttribute( "width",  Width),
          new XAttribute( "height",  Height),
+         new XAttribute( "offsetx",  Horizontal),
+         new XAttribute( "offsety",  Vertical),
+         XmlUtils.If(Transparency != 1, new XAttribute( "opacity",  Transparency)),
          XmlUtils.If(Hidden,  new XAttribute( "visible",  0)),
          XmlUtils.If(Properties.Any(),  new XElement( "properties",  Properties.Select( prop => prop.ToXml()))),
          Data.ToXml()

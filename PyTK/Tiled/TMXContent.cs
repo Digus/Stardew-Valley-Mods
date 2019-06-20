@@ -17,16 +17,17 @@ namespace PyTK.Tiled
         public static IMapFormat TMXFormat = new NewTiledTmxFormat();
         internal static IModHelper Helper = PyTKMod._helper;
         internal static IMonitor Monitor = PyTKMod._monitor;
+        internal static List<string> Injected = new List<string>();
 
 
-        public static Map Load(string path, IModHelper helper)
+        public static Map Load(string path, IModHelper helper, IContentPack contentPack = null)
         {
-            return Load(path, helper, false);
+            return Load(path, helper, false, contentPack);
         }
 
-        public static Map LoadAndSyncToClients(string path, IModHelper helper, string assetNameMap = null)
+        public static Map LoadAndSyncToClients(string path, IModHelper helper, IContentPack contentPack = null, string assetNameMap = null)
         {
-            Map map = Load(path, helper, true);
+            Map map = Load(path, helper, true, contentPack);
 
             if (assetNameMap != null)
                 if (Game1.IsMultiplayer && Game1.IsServer)
@@ -36,23 +37,60 @@ namespace PyTK.Tiled
             return map;
         }
 
-        public static Map Load(string path, IModHelper helper, bool syncTexturesToClients)
+        public static bool doesExist(bool failed, TileSheet t, IContentPack contentPack, IModHelper helper, string tileSheetPath)
+        {
+            if (!failed)
+            {
+                FileInfo tileSheetFile = new FileInfo(Path.Combine(contentPack != null ? contentPack.DirectoryPath : helper.DirectoryPath, tileSheetPath));
+                FileInfo tileSheetFileVanilla = new FileInfo(Path.Combine(PyUtils.ContentPath, "Content", t.ImageSource + ".xnb"));
+
+                return tileSheetFile.Exists && !tileSheetFileVanilla.Exists;
+            }
+            else
+            {
+                Texture2D ts = null;
+                Texture2D tsv = null;
+                try
+                {
+                    ts = contentPack != null ? contentPack.LoadAsset<Texture2D>(tileSheetPath) : helper.Content.Load<Texture2D>(tileSheetPath);
+                    tsv = helper.Content.Load<Texture2D>(tileSheetPath,ContentSource.GameContent);
+                }
+                catch
+                {
+                }
+
+                return (ts != null && tsv == null);
+            }
+        }
+
+        public static Map Load(string path, IModHelper helper, bool syncTexturesToClients, IContentPack contentPack)
         {
             Dictionary<TileSheet, Texture2D> tilesheets = Helper.Reflection.GetField<Dictionary<TileSheet, Texture2D>>(Game1.mapDisplayDevice, "m_tileSheetTextures").GetValue();
-            Map map = tmx2map(Path.Combine(helper.DirectoryPath,path));
+            Map map = tmx2map(Path.Combine(contentPack != null ? contentPack.DirectoryPath : helper.DirectoryPath,path));
             string fileName = new FileInfo(path).Name;
-
+            
             foreach (TileSheet t in map.TileSheets)
             {
+                t.ImageSource = t.ImageSource.Replace(".png", "");
                 string[] seasons = new string[] { "summer_", "fall_", "winter_" };
                 string tileSheetPath = path.Replace(fileName, t.ImageSource + ".png");
+                bool failed = PyUtils.ContentPath == "failed";
 
-                FileInfo tileSheetFile = new FileInfo(Path.Combine(helper.DirectoryPath, tileSheetPath));
-                FileInfo tileSheetFileVanilla = new FileInfo(Path.Combine(PyUtils.getContentFolder(), "Content", t.ImageSource + ".xnb"));
-                if (tileSheetFile.Exists && !tileSheetFileVanilla.Exists && tilesheets.Find(k => k.Key.ImageSource == t.ImageSource).Key == null)
+                
+                if ((doesExist(failed, t,contentPack,helper,tileSheetPath) && tilesheets.Find(k => k.Key.ImageSource == t.ImageSource).Key == null))
                 {
-                    Texture2D tilesheet = helper.Content.Load<Texture2D>(tileSheetPath);
-                    tilesheet.inject(t.ImageSource);
+                    Texture2D tilesheet = contentPack != null ? contentPack.LoadAsset<Texture2D>(tileSheetPath) : helper.Content.Load<Texture2D>(tileSheetPath);
+                    if (!Injected.Contains(t.ImageSource))
+                    {
+                        tilesheet.inject(t.ImageSource);
+                        Injected.Add(t.ImageSource);
+                    }
+
+                    if (!Injected.Contains("Maps/" + t.ImageSource))
+                    {
+                        tilesheet.inject("Maps/" + t.ImageSource);
+                        Injected.Add("Maps/" + t.ImageSource);
+                    }
 
                     if (syncTexturesToClients && Game1.IsMultiplayer && Game1.IsServer)
                         foreach (Farmer farmhand in Game1.otherFarmers.Values)
@@ -62,18 +100,28 @@ namespace PyTK.Tiled
                         foreach (string season in seasons)
                         {
                             string seasonPath = path.Replace(fileName, t.ImageSource.Replace("spring_", season));
-                            FileInfo seasonFile = new FileInfo(Path.Combine(helper.DirectoryPath, seasonPath + ".png"));
+                            FileInfo seasonFile = new FileInfo(Path.Combine(contentPack != null ? contentPack.DirectoryPath : helper.DirectoryPath, seasonPath + ".png"));
                             if (seasonFile.Exists && tilesheets.Find(k => k.Key.ImageSource == t.ImageSource.Replace("spring_", season)).Key == null)
                             {
-                                Texture2D seasonTilesheet = helper.Content.Load<Texture2D>(seasonPath + ".png");
+                                Texture2D seasonTilesheet = contentPack != null ? contentPack.LoadAsset<Texture2D>(seasonPath + ".png") : helper.Content.Load<Texture2D>(seasonPath + ".png");
                                 string seasonTextureName = t.ImageSource.Replace("spring_", season);
-                                seasonTilesheet.inject(seasonTextureName);
-                                seasonTilesheet.inject("Maps/" + seasonTextureName);
+                                if (!Injected.Contains(seasonTextureName))
+                                {
+                                    seasonTilesheet.inject(seasonTextureName);
+                                    Injected.Add(seasonTextureName);
+                                }
+
+                                if (!Injected.Contains("Maps/" + seasonTextureName))
+                                {
+                                    seasonTilesheet.inject("Maps/" + seasonTextureName);
+                                    Injected.Add("Maps/" + seasonTextureName);
+                                }
 
                                 if (syncTexturesToClients && Game1.IsMultiplayer && Game1.IsServer)
                                     foreach (Farmer farmhand in Game1.otherFarmers.Values)
                                         PyNet.sendGameContent(new string[] { seasonTextureName, "Maps/" + seasonTextureName }, seasonTilesheet, farmhand, (b) => Monitor.Log("Syncing " + seasonTextureName + " to " + farmhand.Name + ": " + (b ? "successful" : "failed"), b ? LogLevel.Info : LogLevel.Warn));
-                            }
+                                                       
+    }
                         }
                 }
             }
@@ -218,6 +266,7 @@ namespace PyTK.Tiled
 
         internal static Map tmx2map(string path)
         {
+            path = path.Replace(@"/[TMX Loader]", "");
             Map newMap = FormatManager.Instance.LoadMap(path);
 
             foreach (TileSheet t in newMap.TileSheets)

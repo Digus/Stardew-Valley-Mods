@@ -6,6 +6,8 @@ using StardewValley.Minigames;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using xTile;
+using xTile.ObjectModel;
 using SObject = StardewValley.Object;
 
 
@@ -16,10 +18,133 @@ namespace PyTK.Lua
         internal static IModHelper Helper { get; } = PyTKMod._helper;
         internal static IMonitor Monitor { get; } = PyTKMod._monitor;
 
-        public static bool log(string text)
+        public static void log(string text)
         {
             Monitor.Log(text, LogLevel.Info);
-            return true;
+        }
+
+        public static bool hasMod(string mod)
+        {
+            foreach (var m in Helper.ModRegistry.GetAll())
+                if (m.Manifest.UniqueID.Equals(mod))
+                    return true;
+
+            return false;
+        }
+
+        public static int setCounter(string id, int value)
+        {
+            return counters(id, value, true);
+        }
+
+        public static int counters(string id, int value = 0, bool set = false)
+        {
+            if (!PyTKMod.saveData.Counters.ContainsKey(id))
+                PyTKMod.saveData.Counters.Add(id, 0);
+
+            int before = PyTKMod.saveData.Counters[id];
+
+            if (!set)
+                PyTKMod.saveData.Counters[id] += value;
+            else
+                PyTKMod.saveData.Counters[id] = value;
+
+            int after = PyTKMod.saveData.Counters[id];
+
+            int dif = after - before;
+            if (dif != 0 && Game1.IsMultiplayer)
+                PyTKMod.syncCounter(id, dif);
+
+            return PyTKMod.saveData.Counters[id];
+        }
+
+        public static bool invertSwitch(string id)
+        {
+            id = "switch_" + id;
+            return setCounter(id, counters(id) == 1 ? 0 : 1) == 1;
+        }
+
+        public static bool switches(string id, bool? value = null)
+        {
+            id = "switch_" + id;
+            if (value.HasValue)
+                setCounter(id, value.Value ? 1 : 0);
+
+            return counters(id) == 1;
+        }
+
+        public static bool setMapProperty(Map map, string property, string value)
+        {
+                map.Properties[property] = value;
+                return true;
+        }
+
+        public static bool setMapProperty(string locationName, string property, string value)
+        {
+            return setMapProperty(Game1.getLocationFromName(locationName).Map, property, value);
+        }
+
+        public static bool setLayerProperty(string locationName, string layer, string property, string value)
+        {
+            return setLayerProperty(Game1.getLocationFromName(locationName).Map, layer, property, value);
+        }
+
+        public static string getMapProperty(Map map, string property)
+        {
+            PropertyValue p = "";
+            if (map.Properties.TryGetValue(property, out p))
+                return p.ToString();
+
+            return "";
+        }
+
+        public static string getLayerProperty(Map map, string layer, string property)
+        {
+            PropertyValue p = "";
+            var mapLayer = map.GetLayer(layer);
+            if (mapLayer != null && mapLayer.Properties.TryGetValue(property, out p))
+                return p.ToString();
+
+            return "";
+        }
+
+        public static bool setLayerProperty(Map map, string layer, string property, string value)
+        {
+            var mapLayer = map.GetLayer(layer);
+            if (mapLayer != null)
+            {
+                mapLayer.Properties[property] = value;
+                return true;
+            }
+            return false;
+        }
+
+        public static string getMapProperty(string locationName, string layer, string property)
+        {
+            return getLayerProperty(Game1.getLocationFromName(locationName).Map, layer, property);
+        }
+
+        public static GameLocation getLocation(string locationName)
+        {
+            return Game1.getLocationFromName(locationName);
+        }
+
+        public static string getMapProperty(string locationName, string property)
+        {
+            return getMapProperty(Game1.getLocationFromName(locationName).Map, property);
+        }
+
+        public static void updateWarps(string locationName)
+        {
+            updateWarps(Game1.getLocationFromName(locationName));
+        }
+
+        public static void updateWarps(GameLocation location)
+        {
+            location.warps.Clear();
+            PropertyValue p = "";
+            if (location.Map.Properties.TryGetValue("Warp", out p) && p != "")
+                Helper.Reflection.GetMethod(location, "updateWarps").Invoke();
         }
 
         public static bool setGameValue(string field, object value, int delay = 0, object root = null)
@@ -45,6 +170,19 @@ namespace PyTK.Lua
                 fieldInfo.SetValue(fieldInfo.IsStatic ? null : currentBranch, value);
 
             return true;
+        }
+
+        public static double getDistance(Vector2 p1, Vector2 p2)
+        {
+            float distX = Math.Abs(p1.X - p2.X);
+            float distY = Math.Abs(p1.Y - p2.Y);
+            double dist = (distX * distX) + (distY * distY);
+            return dist;
+        }
+        
+        public static double getTileDistance(Vector2 p1, Vector2 p2)
+        {
+            return Math.Sqrt(getDistance(p1, p2));
         }
 
         public static string getObjectType(object o)

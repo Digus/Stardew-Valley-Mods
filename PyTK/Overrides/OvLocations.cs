@@ -1,11 +1,19 @@
 ﻿using Harmony;
 using Microsoft.Xna.Framework;
+using PyTK.CustomElementHandler;
 using PyTK.Types;
 using StardewModdingAPI;
 using StardewValley;
+using StardewValley.Buildings;
 using StardewValley.Locations;
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Linq;
+using PyTK.Extensions;
+using xTile;
+using xTile.ObjectModel;
 
 namespace PyTK.Overrides
 {
@@ -13,6 +21,88 @@ namespace PyTK.Overrides
     {
         internal static IModHelper Helper { get; } = PyTKMod._helper;
         internal static IMonitor Monitor { get; } = PyTKMod._monitor;
+        internal static Dictionary<int, Rectangle> rectangleCache = new Dictionary<int, Rectangle>();
+        internal static Dictionary<string, Func<string, string, GameLocation, bool>> eventConditions = new Dictionary<string, Func<string,string, GameLocation, bool>>();
+
+        [HarmonyPatch]
+        internal class GLBugFix
+        {
+            internal static MethodInfo TargetMethod()
+            {
+                return AccessTools.Method(PyUtils.getTypeSDV("GameLocation"), "Equals",new[] { PyUtils.getTypeSDV("GameLocation") });
+            }
+
+            internal static bool Prefix(GameLocation __instance, GameLocation other, ref bool __result)
+            {
+                __result = object.Equals((object)__instance.Name, (object)other.Name) && object.Equals((object)__instance.uniqueName.Value, (object)other.uniqueName.Value ) && object.Equals((object)__instance.isStructure.Value, (object)other.isStructure.Value);
+                return false;
+            }
+        }
+        [HarmonyPatch]
+        internal class EventConditionsFix
+        {
+            internal static MethodInfo TargetMethod()
+            {
+                return AccessTools.Method(PyUtils.getTypeSDV("GameLocation"), "checkEventPrecondition");
+            }
+
+            internal static bool Prefix(GameLocation __instance, ref string precondition,ref bool __result)
+            {
+                string t = "M " + (Game1.player.money - 1);
+                string f = "M " + (Game1.player.money + 1);
+
+                foreach(var entry in eventConditions)
+                {
+                    if(precondition.Contains("/!" + entry.Key + " ") || precondition.StartsWith("!" + entry.Key + " ") || precondition.Contains("/" + entry.Key + " ") || precondition.StartsWith(entry.Key + " "))
+                    {
+                        string[] conditions = precondition.Split('/');
+                        for (int i = 0; i < conditions.Length; i++)
+                        {
+                            if (conditions[i].StartsWith(entry.Key) || conditions[i].StartsWith("!"+entry.Key))
+                            {
+                                bool comp = true;
+
+                                if (conditions[i].StartsWith("!" + entry.Key))
+                                {
+                                    conditions[i] = conditions[i].Substring(1);
+                                    comp = false;
+                                }
+
+                                if (entry.Value.Invoke(entry.Key, conditions[i], __instance) == comp)
+                                    conditions[i] = t;
+                                else
+                                {
+                                    conditions[i] = f;
+                                    __result = false;
+                                    return false;
+                                }
+
+                            }
+                        }
+
+                        precondition = string.Join("/", conditions);
+                    }
+                }
+
+                return true;
+            }
+        }
+
+
+        [HarmonyPatch]
+        internal class BLoadBugFix
+        {
+            internal static MethodInfo TargetMethod()
+            {
+                return AccessTools.Method(PyUtils.getTypeSDV("Buildings.Building"), "load");
+            }
+
+            internal static bool Prefix(Building __instance)
+            {
+                return !(__instance is Mill m && (SaveHandler.getDataString(__instance).StartsWith(SaveHandler.newPrefix)) && m.indoors.Value is GameLocation gl && (SaveHandler.getDataString(gl).StartsWith(SaveHandler.newPrefix)));
+            }
+        }
+
 
         [HarmonyPatch]
         internal class TouchActionFix
@@ -126,6 +216,35 @@ namespace PyTK.Overrides
                     else
                         Game1.locations.Add(new GameLocation(locationMap, locationName));
                 }
+            }
+        }
+
+        [HarmonyPatch]
+        internal class GetRectangleFix
+        {
+            internal static MethodInfo TargetMethod()
+            {
+                return AccessTools.Method(PyUtils.getTypeSDV("GameLocation"), "getSourceRectForObject", new[] { typeof(int) });
+            }
+
+            internal static bool Prefix(GameLocation __instance, int tileIndex, Rectangle __result, ref bool __state)
+            {
+                Rectangle tileRectangle;
+                __state = true;
+
+                if (rectangleCache.TryGetValue(tileIndex,out tileRectangle))
+                {
+                    __result = tileRectangle;
+                    __state = false;
+                }
+                
+                return __state;
+            }
+
+            internal static void Postfix(GameLocation __instance, int tileIndex, Rectangle __result, ref bool __state)
+            {
+                if(!__state)
+                    rectangleCache.AddOrReplace(tileIndex, __result);
             }
         }
 

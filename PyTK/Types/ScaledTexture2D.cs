@@ -7,9 +7,8 @@ namespace PyTK.Types
     public class ScaledTexture2D : Texture2D
     {
         public float Scale{ get; set; }
-        public Texture2D STexture { get; set; }
-        public Vector2 DestinationPositionAdjustment { get; set; } = Vector2.Zero;
-        public Vector2 SourcePositionAdjustment { get; set; } = Vector2.Zero;
+        public virtual Texture2D STexture { get; set; }
+        public Rectangle? ForcedSourceRectangle { get; set; } = null;
 
         public ScaledTexture2D(GraphicsDevice graphicsDevice, int width, int height)
             : base(graphicsDevice, width, height)
@@ -31,20 +30,41 @@ namespace PyTK.Types
             STexture = tex;
         }
 
-        public ScaledTexture2D(GraphicsDevice graphicsDevice, int width, int height, Texture2D scaledTexture, float scale)
+        public ScaledTexture2D(Texture2D tex, float scale = 1)
+            : base(tex.GraphicsDevice, (int)(tex.Width / scale), (int)(tex.Height / scale))
+        {
+            Color[] data = new Color[(int)(tex.Width / scale) * (int)(tex.Height / scale)];
+            PyUtils.getRectangle((int)(tex.Width / scale), (int)(tex.Height / scale), Color.White).GetData(data);
+            SetData(data);
+
+            Scale = scale;
+            STexture = tex;
+        }
+
+        public ScaledTexture2D(Texture2D tex, int width, int height, float scale = 1)
+            : base(tex.GraphicsDevice, (int)(width / scale), (int)(height / scale))
+        {
+            Color[] data = new Color[(int)(width / scale) * (int)(height / scale)];
+            PyUtils.getRectangle((int)(width / scale), (int)(height / scale), Color.White).GetData(data);
+            SetData(data);
+
+            Scale = scale;
+            STexture = tex;
+        }
+
+        public ScaledTexture2D(GraphicsDevice graphicsDevice, int width, int height, Texture2D scaledTexture, float scale, Rectangle? forcedSourceRectangle = null)
             :base(graphicsDevice, width,height)
         {
             Scale = scale;
             STexture = scaledTexture;
+            ForcedSourceRectangle = forcedSourceRectangle;
         }
 
-        public static ScaledTexture2D FromTexture(Texture2D orgTexture, Texture2D scaledTexture, float scale)
+        public static ScaledTexture2D FromTexture(Texture2D orgTexture, Texture2D scaledTexture, float scale, Rectangle? forcedSourceRectangle = null)
         {
             Color[] data = new Color[orgTexture.Width * orgTexture.Height];
             orgTexture.GetData(data);
-            ScaledTexture2D result = new ScaledTexture2D(orgTexture.GraphicsDevice, orgTexture.Width,orgTexture.Height,scaledTexture,scale);
-            result.STexture = scaledTexture;
-            result.Scale = scale;
+            ScaledTexture2D result = new ScaledTexture2D(orgTexture.GraphicsDevice, orgTexture.Width,orgTexture.Height,scaledTexture,scale,forcedSourceRectangle);
             result.SetData(data);
             return result;
         }

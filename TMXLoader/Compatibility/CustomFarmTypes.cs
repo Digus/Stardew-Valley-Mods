@@ -2,6 +2,7 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using PyTK;
+using PyTK.Extensions;
 using PyTK.Tiled;
 using StardewModdingAPI;
 using StardewValley;
@@ -21,7 +22,7 @@ namespace TMXLoader.Compatibility
         internal static IModHelper TMXHelper => TMXLoaderMod.helper;
 
         internal static void LoadingTheMaps()
-        {
+        {            
             Type mod = Type.GetType("CustomFarmTypes.Mod, CustomFarmTypes");
             if (mod == null)
                 return;
@@ -43,7 +44,7 @@ namespace TMXLoader.Compatibility
 
                     if (type == null)
                     {
-                        TMXLoaderMod.monitor.Log("Problem reading type.json for custom farm type \"" + choice + "\".");
+                        TMXLoaderMod.monitor.Log("Error reading type.json for custom farm type \"" + choice + "\".");
                         continue;
                     }
 
@@ -99,6 +100,7 @@ namespace TMXLoader.Compatibility
 
                 TMXLoaderMod.monitor.Log("Loading.. " + Path.Combine(Folder, "map.tmx"));
                 __result = TMXContent.Load(mapPath, Helper);
+                TMXLoaderMod.mapsToSync.AddOrReplace("Farm", __result);
             }
         }
 

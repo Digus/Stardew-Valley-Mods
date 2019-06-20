@@ -7,8 +7,6 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.IO;
 using StardewValley;
-using System;
-using System.Linq;
 
 namespace Visualize
 {
@@ -35,27 +33,32 @@ namespace Visualize
             _helper = Helper;
             loadProfiles();
             setActiveProfile(new Profile());
-            ControlEvents.KeyPressed += ControlEvents_KeyPressed;
-            GameEvents.HalfSecondTick += GameEvents_HalfSecondTick;
-            MenuEvents.MenuChanged += MenuEvents_MenuChanged;
-            TimeEvents.AfterDayStarted += TimeEvents_AfterDayStarted;
+            this.Helper.Events.Input.ButtonPressed += OnButtonPressed;
+            this.Helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
+            this.Helper.Events.Display.MenuChanged += OnMenuChanged;
+            helper.ConsoleCommands.Add("visrefresh", "Clears the Visualize cache.", (s, p) => emptyCache());
+            this.Helper.Events.GameLoop.DayStarted += OnDayStarted;
             harmonyFix();
         }
 
-        private void TimeEvents_AfterDayStarted(object sender, EventArgs e)
+        private void OnDayStarted(object sender, DayStartedEventArgs e)
         {
             emptyCache();
         }
 
-        private void MenuEvents_MenuChanged(object sender, EventArgsClickableMenuChanged e)
-        {            
-            setActiveProfile();
-            MenuEvents.MenuChanged -= MenuEvents_MenuChanged;
+        private void OnMenuChanged(object sender, MenuChangedEventArgs e)
+        {
+            if (e.NewMenu != null)
+            {
+                setActiveProfile();
+                this.Helper.Events.Display.MenuChanged -= OnMenuChanged;
+            }
         }
 
-        private void GameEvents_HalfSecondTick(object sender, EventArgs e)
+        private void OnUpdateTicked(object sender, UpdateTickedEventArgs e)
         {
-            pass = 0;
+            if (e.IsMultipleOf(30)) // half-second tick
+                pass = 0;
         }
 
         internal static bool callDrawHandlers(ref SpriteBatch __instance, ref Texture2D texture, ref Vector4 destination, ref bool scaleDestination, ref Rectangle? sourceRectangle, ref Color color, ref float rotation, ref Vector2 origin, ref SpriteEffects effects, ref float depth)
@@ -67,23 +70,23 @@ namespace Visualize
             return true;
         }
 
-        private void ControlEvents_KeyPressed(object sender, EventArgsKeyPressed e)
+        private void OnButtonPressed(object sender, ButtonPressedEventArgs e)
         {
-            if (e.KeyPressed == _config.next)
+            if (e.Button == _config.next)
                 switchProfile(1);
 
-            if (e.KeyPressed == _config.previous)
+            if (e.Button == _config.previous)
                 switchProfile(-1);
 
-            if (e.KeyPressed == _config.reset)
+            if (e.Button == _config.reset)
                 reset();
 
-            if (e.KeyPressed == _config.satHigher || e.KeyPressed == _config.satLower)
+            if (e.Button == _config.satHigher || e.Button == _config.satLower)
             {
-                if (e.KeyPressed == _config.satHigher)
+                if (e.Button == _config.satHigher)
                     _config.saturation = MathHelper.Min(200, _config.saturation + 10);
 
-                if (e.KeyPressed == _config.satLower)
+                if (e.Button == _config.satLower)
                     _config.saturation = MathHelper.Max(0, _config.saturation - 10);
 
                 emptyCache();
@@ -177,9 +180,10 @@ namespace Visualize
         {
             string[] files = parseDir(Path.Combine(Helper.DirectoryPath, "Profiles"), "*.json");
 
-            foreach (string file in files)
+            foreach (string fullPath in files)
             {
-                Profile profile = Helper.ReadJsonFile<Profile>(file);
+                string filename = Path.GetFileName(fullPath);
+                Profile profile = Helper.Data.ReadJsonFile<Profile>(Path.Combine("Profiles", filename));
 
                 if (profile.id == "auto")
                     profile.id = profile.author + "." + profile.name;

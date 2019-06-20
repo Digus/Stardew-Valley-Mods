@@ -15,7 +15,9 @@ using SObject = StardewValley.Object;
 using Microsoft.Xna.Framework;
 using System;
 using StardewValley.Tools;
-using Microsoft.Xna.Framework.Input;
+using PyTK.Lua;
+using StardewValley.Locations;
+using StardewValley.Buildings;
 
 namespace CustomFarmingRedux
 {
@@ -25,9 +27,10 @@ namespace CustomFarmingRedux
         public static IMonitor _monitor;
         public static List<CustomMachineBlueprint> machines = new List<CustomMachineBlueprint>();
         public static Config _config;
-        public static string folder = "Machines";
-        public static string legacyFolder = "MachinesCF1";
+        public static bool hasKisekae = false;
+        public static IMod kisekae = null;
         internal static Dictionary<string, int> craftingrecipes = new Dictionary<string, int>();
+        internal static Dictionary<string, MachineHandler> machineHandlers = new Dictionary<string, MachineHandler>();
 
 
         public override void Entry(IModHelper helper)
@@ -35,28 +38,70 @@ namespace CustomFarmingRedux
             _helper = Helper;
             _monitor = Monitor;
             _config = Helper.ReadConfig<Config>();
+            hasKisekae = helper.ModRegistry.IsLoaded("Kabigon.kisekae");
 
-            loadPacks();
-            MenuEvents.MenuChanged += MenuEvents_MenuChanged;
-            SaveEvents.AfterLoad += (s, e) =>
-            {
-                foreach (var c in craftingrecipes)
-                    if (Game1.player.craftingRecipes.ContainsKey(c.Key))
-                        Game1.player.craftingRecipes[c.Key] = c.Value;
-                    else
-                        Game1.player.craftingRecipes.Add(c.Key, c.Value);
-            };
+            helper.Events.GameLoop.GameLaunched += OnGameLaunched;
+            helper.Events.Display.MenuChanged += OnMenuChanged;
+            helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
 
             harmonyFix();
-            SaveHandler.addPreprocessor(legacyFix);
-            SaveHandler.addReplacementPreprocessor(fixLegacyObject);
             helper.ConsoleCommands.Add("replace_custom_farming", "Triggers Custom Farming Replacement", replaceCustomFarming);
+            helper.ConsoleCommands.Add("cfclear", "Clears all machines", CFClear);
+        }
 
-            if(_config.water)
+        private void CFClear(string s, string[] p)
+        {
+            foreach(GameLocation gl in Game1.locations)
+            {
+                foreach(CustomMachine m in gl.objects.Values.Where(v => v is CustomMachine))
+                        m.clear();
+
+                if(gl is BuildableGameLocation bgl)
+                    foreach (Building b in bgl.buildings.Where(i => i.indoors.Value is GameLocation))
+                        foreach(CustomMachine m in b.indoors.Value.objects.Values.Where(v => v is CustomMachine))
+                            m.clear();
+
+            }
+        }
+
+        private void OnGameLaunched(object sender, GameLaunchedEventArgs e)
+        {
+            if (hasKisekae)
+            {
+                var registry = Helper.ModRegistry.GetType().GetField("Registry", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(Helper.ModRegistry);
+                System.Collections.IList list = (System.Collections.IList)registry.GetType().GetField("Mods", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(registry);
+                foreach (var m in list)
+                {
+                    IManifest mmanifest = (IManifest)m.GetType().GetProperty("Manifest").GetValue(m);
+                    if (mmanifest.UniqueID == "Kabigon.kisekae")
+                    {
+                        kisekae = (IMod)m.GetType().GetProperty("Mod").GetValue(m);
+                        break;
+                    }
+                }
+            }
+
+            loadPacks();
+
+            if (_config.water)
             {
                 new CustomObjectData("Platonymous.Water", "Water/1/2/Cooking -7/Water/Plain drinking water./drink/0 0 0 0 0 0 0 0 0 0 0/0", Game1.objectSpriteSheet.getTile(247).setSaturation(0), Color.Aqua, type: typeof(WaterItem));
                 ButtonClick.ActionButton.onClick((pos) => clickedOnWateringCan(pos), (p) => convertWater());
             }
+
+            PyLua.registerType(typeof(CustomMachine), registerAssembly: true);
+        }
+
+        private void OnSaveLoaded(object sender, SaveLoadedEventArgs e)
+        {
+            foreach (var c in craftingrecipes)
+                if (Game1.player.craftingRecipes.ContainsKey(c.Key))
+                    Game1.player.craftingRecipes[c.Key] = c.Value;
+                else
+                    Game1.player.craftingRecipes.Add(c.Key, c.Value);
+
+            CustomObject.betterArtisanGoods = System.Type.GetType("BetterArtisanGoodIcons.ArtisanGoodsManager, BetterArtisanGoodIcons");
+            CustomObject.hasBetterArtisanGoods = CustomObject.betterArtisanGoods != null;
         }
 
         private bool clickedOnWateringCan(Point pos)
@@ -64,7 +109,7 @@ namespace CustomFarmingRedux
             if (Game1.activeClickableMenu is GameMenu g && g.currentTab == 0 && Game1.player.Items.ToList().Exists(i => i is WateringCan))
             {
                 List<IClickableMenu> pages = _helper.Reflection.GetField<List<IClickableMenu>>(g, "pages").GetValue();
-                if (pages.Find(p => p is InventoryPage) is InventoryPage ip && ip.inventory.inventory.Exists(c => ip.inventory.actualInventory[int.Parse(c.name)] is WateringCan && c.containsPoint(pos.X, pos.Y)))
+                if (pages.Find(p => p is InventoryPage) is InventoryPage ip && ip.inventory.inventory.Exists(c => int.Parse(c.name) is int i && i > 0 && i < ip.inventory.actualInventory.Count &&  ip.inventory.actualInventory[i] is WateringCan && c.containsPoint(pos.X, pos.Y)))
                     return true;
             }
             return false;
@@ -155,72 +200,21 @@ namespace CustomFarmingRedux
             }
         }
 
-        private static string legacyFix(string dataString)
-        {
-            if (dataString.Contains("simpleMachine"))
-            {
-
-                string[] data = SaveHandler.splitElemets(dataString);
-                Dictionary<string, string> additionalSaveData = new Dictionary<string, string>();
-
-                for (int i = 3; i < data.Length; i++)
-                {
-                    string[] entry = data[i].Split(SaveHandler.valueSeperator);
-                    additionalSaveData.Add(entry[0], entry[1]);
-                }
-
-                string id = new DirectoryInfo(additionalSaveData["modfolder"]).Name + "." + additionalSaveData["filename"];
-                CustomMachineBlueprint machine = machines.Find(m => m.legacy == id);
-
-                if (machine == null)
-                    return dataString;
-
-                dataString = SaveHandler.newPrefix + SaveHandler.seperator + "Object" + SaveHandler.seperator + "CustomFarmingRedux.CustomMachine, CustomFarmingRedux" + SaveHandler.seperator + "id" + SaveHandler.valueSeperator + machine.fullid;
-                _monitor.Log("Legacy machine converted: " + dataString, LogLevel.Trace);
-                return dataString;
-            }
-           
-
-            return dataString;
-        }
-
-        private static object fixLegacyObject(object replacement)
-        {
-            if (replacement is Chest c)
-            {
-                if (c.name.Contains("simpleMachine"))
-                {
-                    c.items.Clear();
-                    return c;
-                }
-
-                if (c.name.Contains("customNamedObject"))
-                {
-                    SObject item = (SObject) c.items[0];
-                    SObject obj = new SObject(Vector2.Zero, item.ParentSheetIndex, item.Stack);
-                    obj.name = item.name;
-                    obj.Quality = item.Quality;
-                    return obj;
-                }
-            }
-
-            return replacement;
-        }
-
         private void harmonyFix()
         {
             typeof(SObjectBAI).PatchType(typeof(SObject), Helper);
             typeof(SObjectBAI).PatchType(typeof(ColoredObject), Helper);
         }
 
-        private void MenuEvents_MenuChanged(object sender, EventArgsClickableMenuChanged e)
+        private void OnMenuChanged(object sender, MenuChangedEventArgs e)
         {
-            if (Game1.activeClickableMenu is GameMenu activeMenu && Helper.Reflection.GetField<List<IClickableMenu>>(activeMenu, "pages").GetValue().Find(p => p is CraftingPage) is CraftingPage craftingPage)
+            if (e.NewMenu is GameMenu activeMenu && Helper.Reflection.GetField<List<IClickableMenu>>(activeMenu, "pages").GetValue().Find(p => p is CraftingPage) is CraftingPage craftingPage)
             {
                 foreach (CustomMachineBlueprint blueprint in machines.Where(m => m.crafting != null))
-                    for (int i = 0; i < craftingPage.pagesOfCraftingRecipes.Count; i++)
+                {
+                    foreach (var page in craftingPage.pagesOfCraftingRecipes)
                     {
-                        if (craftingPage.pagesOfCraftingRecipes[i].Find(k => k.Value.name == blueprint.fullid) is KeyValuePair<ClickableTextureComponent, CraftingRecipe> kv && kv.Value != null && kv.Key != null)
+                        if (page.Find(k => k.Value.name == blueprint.fullid) is KeyValuePair<ClickableTextureComponent, CraftingRecipe> kv && kv.Value != null && kv.Key != null)
                         {
                             kv.Key.texture = blueprint.getTexture();
                             kv.Key.sourceRect = Game1.getSourceRectForStandardTileSheet(kv.Key.texture, blueprint.tileindex, blueprint.tilewidth, blueprint.tileheight);
@@ -228,141 +222,57 @@ namespace CustomFarmingRedux
                             Helper.Reflection.GetField<string>(kv.Value, "description").SetValue(blueprint.description);
                         }
                     }
+                }
             }
+        }
+
+        private List<CustomFarmingPack> loadContentPacks()
+        {
+            List<CustomFarmingPack> packs = new List<CustomFarmingPack>();
+
+            foreach (StardewModdingAPI.IContentPack pack in Helper.ContentPacks.GetOwned())
+            {
+                List<CustomFarmingPack> cpPacks = loadCP(pack);
+                packs.AddRange(cpPacks);
+            }
+
+            return packs;
+        }
+
+        public List<CustomFarmingPack> loadCP(StardewModdingAPI.IContentPack contentPack, SearchOption option = SearchOption.TopDirectoryOnly,  string filesearch = "*.json")
+        {
+            List<CustomFarmingPack> packs = new List<CustomFarmingPack>();
+            string[] files = Directory.GetFiles(contentPack.DirectoryPath, filesearch, option);
+            foreach (string file in files)
+            {
+                FileInfo fileInfo = new FileInfo(file);
+                DirectoryInfo directoryInfo = fileInfo.Directory;
+                string filename = fileInfo.Name;
+                if (filename == "manifest.json")
+                    continue;
+
+                CustomFarmingPack pack = contentPack.ReadJsonFile<CustomFarmingPack>(filename);
+
+                pack.fileName = filename;
+                pack.folderName = directoryInfo.Name;
+                pack.author = contentPack.Manifest.Author;
+                pack.version = contentPack.Manifest.Version.ToString();
+                pack.baseFolder = "ContentPack";
+                pack.contentPack = contentPack;
+                packs.Add(pack);
+            }
+
+            return packs;
         }
 
         private void loadPacks()
         {
             List<CustomFarmingPack> packs = new List<CustomFarmingPack>();
 
-            List<CustomFarmingPack> newPacks = new List<CustomFarmingPack>();
-            string machineDir = Path.Combine(Helper.DirectoryPath, folder);
-            if (Directory.Exists(machineDir) && new DirectoryInfo(machineDir).GetDirectories().Length > 0)
-                PyUtils.loadContentPacks(out newPacks, machineDir, SearchOption.AllDirectories, Monitor);
             machines = new List<CustomMachineBlueprint>();
             Dictionary<string, string> toCrafting = new Dictionary<string, string>();
+            packs.AddRange(loadContentPacks());
 
-            List<CustomFarmingPack> legacyPacks = new List<CustomFarmingPack>();
-            string legacyDir = Path.Combine(Helper.DirectoryPath, legacyFolder);
-            if(Directory.Exists(legacyDir) && new DirectoryInfo(legacyDir).GetDirectories().Length > 0)
-                PyUtils.loadContentPacks(out legacyPacks, legacyDir, SearchOption.AllDirectories, Monitor);
-
-            legacyPacks.useAll(l => l.baseFolder = legacyFolder);
-
-            newPacks.AddRange(legacyPacks);
-
-            foreach (CustomFarmingPack lPack in newPacks)
-            {
-                if (!lPack.legacy)
-                {
-                    packs.AddOrReplace(lPack);
-                    continue;
-                }
-                    
-                string lid = lPack.folderName + "." + lPack.fileName;
-
-                bool exists = false;
-                packs.useAll(p => exists = exists || p.machines.Exists(m => m.legacy == lid));
-
-                if (exists)
-                {
-                    Monitor.Log("Skipped legacy machine " + lid + " because a new version was found.", LogLevel.Trace);
-                    continue;
-                }
-                    
-                CustomFarmingPack next = new CustomFarmingPack();
-                next.legacy = true;
-                next.author = lPack.author;
-                next.fileName = lPack.fileName;
-                next.folderName = lPack.folderName;
-                next.name = lPack.name;
-                next.machines = new List<CustomMachineBlueprint>();
-                CustomMachineBlueprint legacyMachine = new CustomMachineBlueprint();
-                legacyMachine.id = 0;
-                legacyMachine.pack = next;
-                legacyMachine.category = lPack.CategoryName;
-                legacyMachine.description = lPack.Description;
-                legacyMachine.name = lPack.Name;
-                legacyMachine.frames = lPack.WorkAnimationFrames;
-                legacyMachine.pulsate = lPack.WorkAnimationFrames <= 0;
-                legacyMachine.readyindex = lPack.ReadyTileIndex;
-                legacyMachine.tileindex = lPack.TileIndex;
-                legacyMachine.texture = lPack.Tilesheet;
-                legacyMachine.fps = 6;
-                legacyMachine.showitem = lPack.displayItem;
-                legacyMachine.itempos = new int[] { lPack.displayItemX, lPack.displayItemY };
-                legacyMachine.itemzoom = lPack.displayItemZoom;
-                legacyMachine.crafting = lPack.Crafting;
-
-                if (lPack.StarterMaterial > 0)
-                {
-                    IngredientBlueprint starter = new IngredientBlueprint();
-                    starter.index = lPack.StarterMaterial;
-                    starter.stack = lPack.StarterMaterialStack;
-                    legacyMachine.starter = starter;
-                }
-
-                if (lPack.Produce != null && lPack.Produce.ProduceID <= 0)
-                    legacyMachine.asdisplay = true;
-                
-                if (lPack.Produce != null && lPack.Produce.ProduceID > 0)
-                {
-                    legacyMachine.production = new List<RecipeBlueprint>();
-                    legacyMachine.legacy = lid;
-                    Monitor.Log("Legacy:" + legacyMachine.legacy);
-                    RecipeBlueprint baseProduce = new RecipeBlueprint();
-                    baseProduce.name = lPack.Produce.Name;
-                    baseProduce.index = lPack.Produce.ProduceID;
-                    baseProduce.colored = lPack.Produce.useColor;
-                    baseProduce.prefix = lPack.Produce.usePrefix;
-                    baseProduce.suffix = lPack.Produce.useSuffic;
-                    baseProduce.texture = lPack.Produce.Tilesheet;
-                    baseProduce.tileindex = lPack.TileIndex;
-                    baseProduce.time = lPack.Produce.ProductionTime;
-                    baseProduce.stack = lPack.Produce.Stack;
-                    baseProduce.description = lPack.Produce.Description;
-                    baseProduce.quality = lPack.Produce.Quality;
-                    List<int> materials = lPack.Materials.ToList();
-                    baseProduce.materials = new List<IngredientBlueprint> { new IngredientBlueprint() };
-                    baseProduce.materials[0].index = materials[0];
-                    baseProduce.materials[0].exactquality = lPack.Produce.MaterialQuality;
-                    baseProduce.materials[0].stack = lPack.RequiredStack;
-
-                    if (lPack.SpecialProduce != null)
-                    {
-                        foreach (LegacySpecialProduce pnext in lPack.SpecialProduce)
-                        {
-                            RecipeBlueprint nextProduce = new RecipeBlueprint();
-                            nextProduce.name = pnext.Name != null ? pnext.Name : baseProduce.name;
-                            nextProduce.index = pnext.ProduceID != -1 ? pnext.ProduceID : baseProduce.index;
-                            nextProduce.colored = pnext.uc ? pnext._useColor : baseProduce.colored;
-                            nextProduce.prefix = pnext.up ? pnext._usePrefix : baseProduce.prefix;
-                            nextProduce.suffix = pnext.us ? pnext._useSuffix : baseProduce.suffix;
-                            nextProduce.texture = pnext.Tilesheet != null ? pnext.Tilesheet : baseProduce.texture;
-                            nextProduce.tileindex = pnext.TileIndex != -1 ? pnext.TileIndex : baseProduce.tileindex;
-                            nextProduce.time = pnext.ProductionTime != -1 ? pnext.ProductionTime : baseProduce.time;
-                            nextProduce.stack = pnext.Stack != -1 ? pnext.Stack : baseProduce.stack;
-                            nextProduce.description = pnext.Description != null ? pnext.Description : baseProduce._description;
-                            nextProduce.quality = pnext.Quality != -9 ? pnext.Quality : baseProduce.quality;
-                            nextProduce.materials = new List<IngredientBlueprint>() { new IngredientBlueprint() };
-                            nextProduce.materials[0].index = pnext.Material;
-                            nextProduce.materials[0].exactquality = pnext.MaterialQuality;
-                            nextProduce.materials[0].stack = lPack.RequiredStack;
-                            materials.Remove(pnext.Material);
-                            legacyMachine.production.Add(nextProduce);
-                        }
-                    }
-
-                    baseProduce.materials[0].index = materials.Count > 0 ? materials[0] : baseProduce.materials[0].index;
-                    materials.Remove(baseProduce.materials[0].index);
-                    baseProduce.include = materials.Count > 0 ? materials.ToArray() : null;
-                    legacyMachine.production.Add(baseProduce);
-                }
-
-                next.machines.Add(legacyMachine);
-                packs.Add(next);
-            }
-            
             foreach (CustomFarmingPack pack in packs)
                 foreach (CustomMachineBlueprint blueprint in pack.machines)
                 {
@@ -383,8 +293,9 @@ namespace CustomFarmingRedux
 
                     CustomObjectData data = new CustomObjectData(blueprint.fullid, $"{blueprint.name}/{blueprint.price}/-300/Crafting -9/{blueprint.description}/true/true/0/{blueprint.name}", blueprint.getTexture(), Color.White, blueprint.tileindex, true, typeof(CustomMachine), (blueprint.crafting == null || blueprint.crafting == "") ? null : new CraftingData(blueprint.fullid, blueprint.crafting));
 
-                    if (blueprint.forsale && (blueprint.condition == null || PyUtils.CheckEventConditions(blueprint.condition)))
-                        new InventoryItem(new CustomMachine(blueprint), blueprint.price).addToNPCShop(blueprint.shop);
+                    if (blueprint.forsale)
+                        new InventoryItem(new CustomMachine(blueprint), blueprint.price).addToNPCShop(blueprint.shop, blueprint.condition);
+                    Monitor.Log("Added:" + blueprint.fullid);
                 }
             
             Monitor.Log(packs.Count + " Content Packs with " + machines.Count + " machines found.", LogLevel.Trace);

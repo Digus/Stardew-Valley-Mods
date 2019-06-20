@@ -14,6 +14,10 @@ using NCalc;
 using Harmony;
 using System.Reflection;
 using PyTK.Lua;
+using PyTK.Extensions;
+using xTile.Layers;
+using xTile;
+using PyTK.Types;
 
 namespace PyTK
 {
@@ -21,10 +25,33 @@ namespace PyTK
     {
         internal static IModHelper Helper { get; } = PyTKMod._helper;
         internal static IMonitor Monitor { get; } = PyTKMod._monitor;
-
-        public static bool CheckEventConditions(string conditions)
+        internal static string _contentPath = "";
+        public static string ContentPath
         {
-            return checkEventConditions(conditions);
+            get
+            {
+                if (_contentPath == "")
+                {
+                    _contentPath = getContentFolder();
+                    Monitor.Log("ContentPath:" + _contentPath, LogLevel.Info);
+                }
+                return _contentPath;
+            }
+        }
+
+        public static TileAction addTileAction(string key, Func<string, string, GameLocation, Vector2, string, bool> handler)
+        {
+            return new TileAction(key, handler).register();
+        }
+
+        public static void addEventPrecondition(string key, Func<string, string, GameLocation, bool> handler)
+        {
+            Overrides.OvLocations.eventConditions.AddOrReplace(key, handler);
+        }
+
+        public static bool CheckEventConditions(string conditions, object caller = null)
+        {
+            return checkEventConditions(conditions, caller);
         }
 
         public PyUtils()
@@ -32,25 +59,115 @@ namespace PyTK
 
         }
 
+        public static void checkDrawConditions(Map map)
+        {
+            foreach (Layer layer in map.Layers.Where(l => l.Properties.ContainsKey("DrawConditions")))
+                layer.Properties.AddOrReplace("DrawConditionsResult", PyUtils.checkEventConditions(layer.Properties["DrawConditions"], layer,Game1.currentLocation) ? "T" : "F");
+        }
+
+        internal static List<GameLocation> getWarpLocations(GameLocation location)
+        {
+            List<GameLocation> locations = new List<GameLocation>();
+            
+            foreach (Warp warp in location.warps)
+                if (Game1.getLocationFromName(warp.TargetName) is GameLocation l)
+                    locations.AddOrReplace(l);
+
+            return locations;
+        }
+
+        public static void adjustWarps(string name)
+        {
+            if (Game1.getLocationFromName(name) is GameLocation target)
+                foreach (var location in PyUtils.getWarpLocations(target))
+                    PyUtils.adjustInboundWarps(location, target);
+            else
+                Monitor.Log("Could not find Location: " + name);
+        }
+
+        internal static List<GameLocation> adjustInboundWarps(GameLocation location, GameLocation toLocation = null)
+        {
+            if (location == null)
+                return new List<GameLocation>();
+
+            List<GameLocation> locations = new List<GameLocation>();
+
+            foreach (Warp warp in location.warps)
+            {
+                Point move = Point.Zero;
+
+                if (warp.X >= location.map.DisplayWidth / Game1.tileSize)
+                    move.X++;
+                else if (warp.X <= 0)
+                    move.X--;
+                else if (warp.Y >= location.map.DisplayHeight / Game1.tileSize)
+                    move.Y++;
+                else
+                    move.Y--;
+
+                var target = Game1.getLocationFromName(warp.TargetName);
+                if (target == null)
+                    continue;
+
+                if (toLocation == null || target == toLocation)
+                {
+                    locations.AddOrReplace(target);
+                    Warp inbound = target.warps.Where(w => w.TargetName == location.Name).OrderBy(w => LuaUtils.getDistance(new Vector2(w.X + move.X, w.Y + move.Y), new Vector2(warp.TargetX, warp.TargetY))).First();
+                    if (inbound != null && !(inbound.X == 0 && inbound.Y == 0))
+                    {
+                        warp.TargetX = inbound.X + move.X;
+                        warp.TargetY = inbound.Y + move.Y;
+                    }
+                }
+            }
+
+            Monitor.Log("Adjusted Warps: "+location.Name,LogLevel.Trace);
+
+            return locations;
+        }
+
         public static string getContentFolder()
         {
-            string folder = Path.Combine(Environment.CurrentDirectory, Game1.content.RootDirectory);
+            string folder = Path.Combine(Constants.ExecutionPath, Game1.content.RootDirectory);
             DirectoryInfo directoryInfo = new DirectoryInfo(folder);
 
             if (directoryInfo.Exists)
                 return folder;
 
-            folder = folder.Replace("MacOS", "Resources");
+            folder = folder.Replace("MacOS", "Resources").Replace("smapi-internal/","");
 
             directoryInfo = new DirectoryInfo(folder);
             if (directoryInfo.Exists)
                 return folder;
+            else
+                Monitor.Log("DebugF:" + folder);
 
-            return null;
+            return @"failed";
         }
 
         public static bool checkEventConditions(string conditions)
         {
+            return checkEventConditions(conditions, null, null);
+        }
+
+        public static bool checkEventConditions(string conditions, object caller)
+        {
+            return checkEventConditions(conditions, caller, null);
+        }
+
+        public static bool checkEventConditions(string conditions, object caller, GameLocation location)
+        {
+            if (!Context.IsWorldReady)
+            {
+                if (conditions.StartsWith("r "))
+                {
+                    string[] cond = conditions.Split(' ');
+                    return Game1.random.NextDouble() <= double.Parse(cond[1]);
+                }
+
+                return false;
+            }
+
             if (conditions == null || conditions == "")
                 return true;
 
@@ -65,10 +182,46 @@ namespace PyTK
 
             if (conditions.StartsWith("PC "))
                 result = checkPlayerConditions(conditions.Replace("PC ", ""));
-            else if (conditions.StartsWith("LC "))
-                result = checkLuaConditions(conditions.Replace("LC ", ""));
+            else if (conditions.StartsWith("LC ") || conditions.StartsWith("!LC "))
+                result = checkLuaConditions(conditions.StartsWith("!LC "), conditions.Replace("LC ", "").Replace("!LC ", ""), caller);
             else
-                result = Helper.Reflection.GetMethod(Game1.currentLocation, "checkEventPrecondition").Invoke<int>("9999999/" + conditions) != -1;
+            {
+                if(location == null)
+                    location = Game1.currentLocation;
+
+                if (!(location is GameLocation))
+                    location = Game1.getFarm();
+
+                if (location == null)
+                {
+                    if (conditions.StartsWith("r "))
+                    {
+                        string[] cond = conditions.Split(' ');
+                        return Game1.random.NextDouble() <= double.Parse(cond[1]);
+                    }
+
+                    result = false;
+                }
+                else
+                {
+                    try
+                    {
+                        result = Helper.Reflection.GetMethod(location, "checkEventPrecondition").Invoke<int>("9999999/" + conditions) != -1;
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            var m = typeof(GameLocation).GetMethod("checkEventPrecondition", BindingFlags.NonPublic | BindingFlags.Instance);
+                            result = (int)m.Invoke(location, new string[] { ("9999999/" + conditions) }) != -1;
+                        }
+                        catch
+                        {
+                            result = false;
+                        }
+                    }
+                }
+            }
 
             return result == comparer;
         }
@@ -78,12 +231,19 @@ namespace PyTK
             return Helper.Reflection.GetField<bool>(Game1.player, conditions).GetValue();
         }
 
-        public static bool checkLuaConditions(string conditions)
+        public static bool checkLuaConditions(bool negated, string conditions, object caller = null)
+        {
+            return checkLuaConditions(conditions, caller) == !negated;
+        }
+
+            public static bool checkLuaConditions(string conditions, object caller = null)
         {
             var script = PyLua.getNewScript();
             script.Globals["result"] = false;
+            if (caller != null)
+                script.Globals["caller"] = caller;
             script.DoString("result = (" + conditions + ")");
-            return (bool) script.Globals["result"];
+            return (bool)script.Globals["result"];
         }
 
         public static List<GameLocation> getAllLocationsAndBuidlings()
@@ -105,36 +265,6 @@ namespace PyTK
             return d;
         }
 
-        public static void loadContentPacks<TModel>(out List<TModel> packs, string folder, SearchOption option = SearchOption.AllDirectories, IMonitor monitor = null, string filesearch = "*.json") where TModel : class
-        {
-            packs = loadContentPacks<TModel>(folder,option,monitor,filesearch);
-        }
-
-        public static List<TModel> loadContentPacks<TModel>(string folder, SearchOption option = SearchOption.AllDirectories, IMonitor monitor = null, string filesearch = "*.json") where TModel : class
-        {
-            List<TModel>  packs = new List<TModel>();
-            string[] files = Directory.GetFiles(folder, filesearch, option);
-            foreach (string file in files)
-            {
-                TModel pack = Helper.ReadJsonFile<TModel>(file);
-                packs.Add(pack);
-
-                if (pack is Types.IContentPack p)
-                {
-                    p.fileName = new FileInfo(file).Name;
-                    p.folderName = new FileInfo(file).Directory.Name;
-
-                    if (monitor != null)
-                    {
-                        string author = p.author == "none" || p.author == null || p.author == "" ? "" : " by " + p.author;
-                        monitor.Log(p.name + " " + p.version + author, LogLevel.Info);
-                    }
-                }
-            }
-
-            return packs;
-        }
-
         public static Type getTypeSDV(string type)
         {
             string prefix = "StardewValley.";
@@ -144,7 +274,6 @@ namespace PyTK
                 return defaulSDV;
             else
                 return Type.GetType(prefix + type + ", StardewValley");
-
         }
 
         public static Texture2D getRectangle(int width, int height, Color color)
@@ -161,6 +290,8 @@ namespace PyTK
         {
             return getRectangle(1, 1, Color.White);
         }
+
+
 
         public static byte[] BitArrayToByteArray(BitArray bits)
         {
@@ -194,7 +325,7 @@ namespace PyTK
             }
         }
 
-        public static float calc(string expression, params KeyValuePair<string,object>[] paramters)
+        public static float calc(string expression, params KeyValuePair<string, object>[] paramters)
         {
             Expression e = new Expression(expression);
 
@@ -202,6 +333,16 @@ namespace PyTK
                 e.Parameters.Add(p.Key, p.Value);
 
             return float.Parse(e.Evaluate().ToString());
+        }
+
+        public static bool calcBoolean(string expression, params KeyValuePair<string, object>[] paramters)
+        {
+            Expression e = new Expression(expression);
+
+            foreach (KeyValuePair<string, object> p in paramters)
+                e.Parameters.Add(p.Key, p.Value);
+
+            return bool.Parse(e.Evaluate().ToString());
         }
 
         public static void initOverride(IModHelper helper, Type type, Type patch, List<string> toPatch)

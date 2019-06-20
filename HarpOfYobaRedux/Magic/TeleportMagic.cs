@@ -21,7 +21,7 @@ namespace HarpOfYobaRedux
         private void teleport()
         {
             Game1.changeMusicTrack("none");
-            Game1.warpFarmer(targetLocation.name, (int)targetPosition.X, (int)targetPosition.Y, false);
+            Game1.warpFarmer(targetLocation.Name, (int)targetPosition.X, (int)targetPosition.Y, false);
             Game1.fadeToBlackAlpha = 0.99f;
             Game1.screenGlow = false;
             Game1.player.temporarilyInvincible = false;
@@ -41,7 +41,6 @@ namespace HarpOfYobaRedux
             Game1.player.freezePause = 1000;
             Game1.flashAlpha = 1f;
 
-            new System.Drawing.Rectangle(Game1.player.GetBoundingBox().X, Game1.player.GetBoundingBox().Y, Game1.tileSize, Game1.tileSize).Inflate(Game1.tileSize * 3, Game1.tileSize * 3);
             int num1 = 0;
 
             for (int index = Game1.player.getTileX() + 8; index >= Game1.player.getTileX() - 8; --index)
@@ -66,7 +65,7 @@ namespace HarpOfYobaRedux
                 lastPosition = new Vector2(53,24);
             }
 
-            targetLocation = Game1.getLocationFromName(lastLocation.name);
+            targetLocation = Game1.getLocationFromName(lastLocation.Name);
             targetPosition = new Vector2(lastPosition.X, lastPosition.Y);
             lastLocation = Game1.currentLocation;
             lastPosition = new Vector2(Game1.player.getTileX(), Game1.player.getTileY());

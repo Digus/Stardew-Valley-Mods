@@ -3,7 +3,6 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
-
 using StardewValley;
 using StardewValley.Menus;
 using System;
@@ -18,8 +17,7 @@ namespace Portraiture
         public static IModHelper helper;
         private static Mod instance;
         internal static PConfig config;
-        internal static Texture2D activeTexure;
-        
+
         public override void Entry(IModHelper help)
         {
             helper = help;
@@ -31,23 +29,26 @@ namespace Portraiture
             if (!Directory.Exists(customContentFolder))
                 Directory.CreateDirectory(customContentFolder);
 
-            SaveEvents.AfterLoad += SaveEvents_AfterLoad;
-            SaveEvents.AfterReturnToTitle += SaveEvents_AfterReturnToTitle;
+            help.Events.GameLoop.SaveLoaded += OnSaveLoaded;
+            help.Events.GameLoop.ReturnedToTitle += OnReturnedToTitle;
             harmonyFix();
-        }
 
-        private void harmonyFix()
+            Helper.ConsoleCommands.Add("pmenu", "", (s, p) =>
+             {
+                 MenuLoader.OpenMenu(Game1.activeClickableMenu);
+             });
+        }
+          private void harmonyFix()
         {
             HarmonyInstance instance = HarmonyInstance.Create("Platonymous.Portraiture");
             instance.PatchAll(Assembly.GetExecutingAssembly());
         }
 
-        private void SaveEvents_AfterReturnToTitle(object sender, EventArgs e)
+        private void OnReturnedToTitle(object sender, EventArgs e)
         {
-            GameEvents.FourthUpdateTick -= GameEvents_FourthUpdateTick;
-            MenuEvents.MenuClosed -= MenuEvents_MenuClosed;
-            MenuEvents.MenuChanged -= MenuEvents_MenuChanged;
-            ControlEvents.KeyPressed -= ControlEvents_KeyPressed;
+            helper.Events.GameLoop.UpdateTicked -= OnUpdateTicked;
+            helper.Events.Display.MenuChanged -= OnMenuChanged;
+            helper.Events.Input.ButtonPressed -= OnButtonPressed;
         }
 
         public static void log (string text)
@@ -55,18 +56,18 @@ namespace Portraiture
             instance.Monitor.Log(text);
         }
 
-        private void SaveEvents_AfterLoad(object sender, System.EventArgs e)
+        private void OnSaveLoaded(object sender, SaveLoadedEventArgs e)
         {
             TextureLoader.loadTextures();
-            GameEvents.FourthUpdateTick += GameEvents_FourthUpdateTick;
-            MenuEvents.MenuClosed += MenuEvents_MenuClosed;
-            MenuEvents.MenuChanged += MenuEvents_MenuChanged;
-            ControlEvents.KeyPressed += ControlEvents_KeyPressed;
+            helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
+            helper.Events.Display.MenuChanged += OnMenuChanged;
+            helper.Events.Input.ButtonPressed += OnButtonPressed;
         }
 
-        private void GameEvents_FourthUpdateTick(object sender, System.EventArgs e)
+        private void OnUpdateTicked(object sender, UpdateTickedEventArgs e)
         {
-            displayAlpha = Math.Max(displayAlpha - 0.05f, 0);
+            if (e.IsMultipleOf(15)) // quarter second
+                displayAlpha = Math.Max(displayAlpha - 0.05f, 0);
         }
 
         private void drawFolderName(SpriteBatch b, int x, int y)
@@ -77,9 +78,6 @@ namespace Portraiture
             string activeFolderText = TextureLoader.getFolderName();
 
             activeFolderText = activeFolderText.Replace('_', ' ');
-
-            if (activeTexure is Texture2D texture && texture.Width > 128)
-                activeFolderText = "= " + activeFolderText;
 
             int textlength = (int)Game1.smallFont.MeasureString(activeFolderText).X;
             int textheight = (int)Game1.smallFont.MeasureString(activeFolderText).Y;
@@ -95,37 +93,44 @@ namespace Portraiture
                 Utility.drawTextWithShadow(b, activeFolderText, Game1.smallFont, new Vector2(displayBoxPos.X + ((displayBoxWidth - textlength) / 2), Game1.pixelZoom + displayBoxPos.Y + ((displayBoxHeight - textheight) / 2)), Game1.textColor);
         }
 
-        private void ControlEvents_KeyPressed(object sender, EventArgsKeyPressed e)
+        private void OnButtonPressed(object sender, ButtonPressedEventArgs e)
         {
-            
-            if (e.KeyPressed == config.changeKey && Game1.activeClickableMenu is DialogueBox d && d.isPortraitBox() && Game1.currentSpeaker is NPC cs)
+            if ((e.Button == config.changeKey || e.Button == config.menuKey) && Game1.activeClickableMenu is DialogueBox d && d.isPortraitBox() && Game1.currentSpeaker is NPC cs)
             {
-                if (d.width < 107 * Game1.pixelZoom * 3 / 2 || Helper.Reflection.GetField<bool>(d, "transitioning").GetValue() || Helper.Reflection.GetField<bool>(d, "isQuestion").GetValue())
-                    return;
+                if (e.Button == config.changeKey)
+                {
+                    if (d.width < 107 * Game1.pixelZoom * 3 / 2 || Helper.Reflection.GetField<bool>(d, "transitioning").GetValue() || Helper.Reflection.GetField<bool>(d, "isQuestion").GetValue())
+                        return;
 
-                TextureLoader.nextFolder();
-                displayAlpha = 2;
+                    TextureLoader.nextFolder();
+                    displayAlpha = 2;
+                }
+                else
+                    MenuLoader.OpenMenu(Game1.activeClickableMenu);
             }
 
         }
 
-        private void MenuEvents_MenuChanged(object sender, EventArgsClickableMenuChanged e)
+        private void OnMenuChanged(object sender, MenuChangedEventArgs e)
         {
-            if (Game1.activeClickableMenu is ShopMenu s && s.portraitPerson is NPC c && c.Portrait is Texture2D t && Game1.options.showMerchantPortraits)
-                GraphicsEvents.OnPostRenderGuiEvent += GraphicsEvents_OnPostRenderGuiEvent;
+            switch (e.NewMenu)
+            {
+                case null:
+                    displayAlpha = 0;
+                    Helper.Events.Display.RenderedActiveMenu -= OnRenderedActiveMenu;
+                    break;
 
-            if (Game1.activeClickableMenu is DialogueBox d && d.isPortraitBox() && Game1.currentSpeaker is NPC ch && ch.Portrait is Texture2D ct)
-                GraphicsEvents.OnPostRenderGuiEvent += GraphicsEvents_OnPostRenderGuiEvent;
+                case ShopMenu shopMenu when (shopMenu.portraitPerson is NPC npc && npc.Portrait is Texture2D t && Game1.options.showMerchantPortraits):
+                    Helper.Events.Display.RenderedActiveMenu += OnRenderedActiveMenu;
+                    break;
 
+                case DialogueBox box when (box.isPortraitBox() && Game1.currentSpeaker is NPC npc && npc.Portrait is Texture2D):
+                    Helper.Events.Display.RenderedActiveMenu += OnRenderedActiveMenu;
+                    break;
+            }
         }
 
-        private void MenuEvents_MenuClosed(object sender, EventArgsClickableMenuClosed e)
-        {
-            displayAlpha = 0;
-            GraphicsEvents.OnPostRenderGuiEvent -= GraphicsEvents_OnPostRenderGuiEvent;
-        }
-
-        private void GraphicsEvents_OnPostRenderGuiEvent(object sender, EventArgs e)
+        private void OnRenderedActiveMenu(object sender, RenderedActiveMenuEventArgs e)
         {
             if (Game1.activeClickableMenu is DialogueBox d && d.isPortraitBox() && Game1.currentSpeaker is NPC cs)
             {

@@ -11,6 +11,7 @@ using System;
 using Harmony;
 using System.Reflection;
 using Microsoft.Xna.Framework.Graphics;
+using PyTK.Extensions;
 
 namespace CustomFurniture
 {
@@ -34,8 +35,8 @@ namespace CustomFurniture
                 Monitor.Log("Harmony Error: Custom deco won't work on tables." + e.StackTrace, LogLevel.Error);
             }
             loadPacks();
-            SaveEvents.AfterLoad += SaveEvents_AfterLoad;
-            SaveEvents.AfterReturnToTitle += SaveEvents_AfterReturnToTitle;
+            helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
+            helper.Events.GameLoop.ReturnedToTitle += OnReturnedToTitle;
             helper.ConsoleCommands.Add("replace_custom_furniture", "Triggers Custom Furniture Replacement", replaceCustomFurniture);
         }
 
@@ -83,7 +84,7 @@ namespace CustomFurniture
                     if (i is Chest chest && furniturePile.Keys.Any(f => f.Equals(i.Name)))
                     {
                         Item cf = furniturePile[furniturePile.Keys.FirstOrDefault(f => f.Equals(i.Name))];
-                        items.Add(cf, new int[] { chest.preservedParentSheetIndex, int.MaxValue });
+                        items.Add(cf, new int[] { chest.preservedParentSheetIndex.Value, int.MaxValue });
                         additions.Add(cf);
                         remove.Add(i);
                     }
@@ -104,14 +105,14 @@ namespace CustomFurniture
             instance.Monitor.Log(text);
         }
 
-        private void SaveEvents_AfterReturnToTitle(object sender, System.EventArgs e)
+        private void OnReturnedToTitle(object sender, ReturnedToTitleEventArgs e)
         {
-            MenuEvents.MenuChanged -= MenuEvents_MenuChanged;
+            Helper.Events.Display.MenuChanged -= OnMenuChanged;
         }
 
-        private void SaveEvents_AfterLoad(object sender, System.EventArgs e)
-        {  
-            MenuEvents.MenuChanged += MenuEvents_MenuChanged;
+        private void OnSaveLoaded(object sender, SaveLoadedEventArgs e)
+        {
+            Helper.Events.Display.MenuChanged += OnMenuChanged;
         }
 
         private void loadPacks()
@@ -119,26 +120,41 @@ namespace CustomFurniture
             int countPacks = 0;
             int countObjects = 0;
 
-            string[] files = parseDir(Path.Combine(Helper.DirectoryPath, "Furniture"), "*.json");
+            var contentPacks = Helper.ContentPacks.GetOwned();
 
-            countPacks = files.Length;
-
-            foreach (string file in files)
+            foreach (IContentPack cpack in contentPacks)
             {
-                CustomFurniturePack pack = Helper.ReadJsonFile<CustomFurniturePack>(file);
-                string author = pack.author == "none" ? "" : " by " + pack.author;
-                Monitor.Log(pack.name + " " + pack.version + author, LogLevel.Info);
-                foreach (CustomFurnitureData data in pack.furniture)
+                string[] cfiles = parseDir(cpack.DirectoryPath, "*.json");
+
+                countPacks += (cfiles.Length - 1);
+
+                foreach (string file in cfiles)
                 {
-                    countObjects++;
-                    data.folderName = Path.GetDirectoryName(file);
-                    string pileID = new DirectoryInfo(data.folderName).Name + "." + new FileInfo(file).Name+ "." + data.id;
-                    string objectID = pileID;
-                    CustomFurnitureMod.log("Load:" + objectID);
-                    CustomFurniture f = new CustomFurniture(data, objectID, Vector2.Zero);
-                    furniturePile.Add(pileID, f);
-                    furniture.Add(objectID, f);
+                    if (file.ToLower().Contains("manifest.json"))
+                        continue;
+
+                    CustomFurniturePack pack = cpack.ReadJsonFile<CustomFurniturePack>(Path.GetFileName(file));
+
+                    pack.author = cpack.Manifest.Author;
+                    pack.version = cpack.Manifest.Version.ToString();
+                    string author = pack.author == "none" ? "" : " by " + pack.author;
+                    Monitor.Log(pack.name + " " + pack.version + author, LogLevel.Info);
+                    foreach (CustomFurnitureData data in pack.furniture)
+                    {
+                        countObjects++;
+                        data.folderName = pack.useid == "none" ? cpack.Manifest.UniqueID : pack.useid;
+                        string pileID = data.folderName + "." + Path.GetFileName(file) + "." + data.id;
+                        string objectID = pileID;
+                        CustomFurnitureMod.log("Load:" + objectID);
+                        string tkey = $"{data.folderName}/{ data.texture}";
+                        if (!CustomFurniture.Textures.ContainsKey(tkey))
+                            CustomFurniture.Textures.Add(tkey, cpack.LoadAsset<Texture2D>(data.texture));
+                        CustomFurniture f = new CustomFurniture(data, objectID, Vector2.Zero);
+                        furniturePile.Add(pileID, f);
+                        furniture.Add(objectID, f);
+                    }
                 }
+
             }
 
             Monitor.Log(countPacks + " Content Packs with " + countObjects + " Objects found.");
@@ -154,7 +170,7 @@ namespace CustomFurniture
             return (Helper.Reflection.GetMethod(Game1.currentLocation, "checkEventPrecondition").Invoke<int>("9999984/" + conditions) != -1);
         }
 
-        private void MenuEvents_MenuChanged(object sender, EventArgsClickableMenuChanged e)
+        private void OnMenuChanged(object sender, MenuChangedEventArgs e)
         {
             if (Game1.activeClickableMenu is ShopMenu)
             {
@@ -175,7 +191,7 @@ namespace CustomFurniture
                         if (!f.data.sellAtShop || (f.data.conditions != "none" && !meetsConditions(f.data.conditions)))
                             continue;
 
-                        if (Game1.getCharacterFromName(f.data.shopkeeper) is NPC sk && !sk.isInvisible)
+                        if (Game1.getCharacterFromName(f.data.shopkeeper) is NPC sk && !sk.IsInvisible)
                             shopkeeper = f.data.shopkeeper;
                         else
                             shopkeeper = "Robin";
@@ -187,8 +203,8 @@ namespace CustomFurniture
                             continue;
                         }
 
-                        if ((shop.portraitPerson is NPC shopk && shopk.name == shopkeeper) || isCatalogue)
-                                newItemsToSell.Add(f, isCatalogue ? 0 : f.price);
+                        if ((shop.portraitPerson is NPC shopk && shopk.Name == shopkeeper) || isCatalogue)
+                                newItemsToSell.Add(f, isCatalogue ? 0 : f.Price);
                     }
 
                     foreach (Item item in newItemsToSell.Keys)

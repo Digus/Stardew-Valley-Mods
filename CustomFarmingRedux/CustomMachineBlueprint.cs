@@ -1,6 +1,10 @@
-﻿using Microsoft.Xna.Framework.Graphics;
+﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using PyTK.Extensions;
+using PyTK.Types;
 using StardewModdingAPI;
 using StardewValley;
+using System;
 using System.Collections.Generic;
 
 
@@ -12,11 +16,13 @@ namespace CustomFarmingRedux
         internal IMonitor Monitor = CustomFarmingReduxMod._monitor;
 
         public int id { get; set; }
+        public string useid => pack.useid;
         public string fullid
         {
             get
             {
-                return $"{folder}.{file}.{id}";
+                string folderid = (useid != "") ? useid : folder;
+                return $"{folderid}.{file}.{id}";
             }
         }
         public string name { get; set; }
@@ -49,6 +55,15 @@ namespace CustomFarmingRedux
         public string condition { get; set; }
         public string crafting { get; set; }
         public Texture2D texture2d { get; set; }
+        public string workconditions { get; set; } = "";
+        public bool conditionaldropin { get; set; } = false;
+        public bool conditionalanimation { get; set; } = false;
+        public bool lightsource { get; set; } = false;
+        public int[] lightcolor { get; set; } = new int[] { 0, 139, 139, 255 };
+        public bool worklight { get; set; } = true;
+        public float lightradius { get; set; } = 1.5f;
+        public bool scaleup { get; set; } = false;
+        public int originalwidth { get; set; } = 16;
 
         public Texture2D getTexture(IModHelper helper = null)
         {
@@ -62,8 +77,19 @@ namespace CustomFarmingRedux
                 if (texture == null || texture == "")
                     texture2d = Game1.objectSpriteSheet;
                 else
-                    texture2d = helper.Content.Load<Texture2D>($"{pack.baseFolder}/{folder}/{texture}");
+                {
+                    if (pack.baseFolder != "ContentPack")
+                        texture2d = helper.Content.Load<Texture2D>($"{pack.baseFolder}/{folder}/{texture}");
+                    else
+                        texture2d = pack.contentPack.LoadAsset<Texture2D>(texture);
+                }
 
+            if (scaleup)
+            {
+                float scale = (float)(Convert.ToDouble(texture2d.Width) / Convert.ToDouble(originalwidth));
+                int height = (int)(texture2d.Height / scale);
+                texture2d = ScaledTexture2D.FromTexture(texture2d.getArea(new Rectangle(0, 0, originalwidth, height)), texture2d, scale);
+            }
             return texture2d;
         }
 

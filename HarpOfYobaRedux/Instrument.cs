@@ -10,11 +10,10 @@ using PyTK;
 
 namespace HarpOfYobaRedux
 {
-    internal class Instrument : Tool, ISaveElement
+    internal class Instrument : Tool, ISaveElement, ICustomObject
     {
-        private static Dictionary<string,Instrument> allInstruments;
+        internal static Dictionary<string,Instrument> allInstruments;
         public string instrumentID;
-        public bool owned;
         private Texture2D texture;
         private bool readyToPlay;
         private int timeWhenReady;
@@ -29,25 +28,10 @@ namespace HarpOfYobaRedux
             
         }
 
-        public static bool hasInstument(string id)
+        public Instrument(CustomObjectData data)
+            : this(data.id.Split('.')[2])
         {
-            return allInstruments[id].owned;
-        }
 
-        public static void beforeRebuilding()
-        {
-            foreach(Instrument instrument in allInstruments.Values)
-            {
-                instrument.owned = false;
-            }
-        }
-
-        public override string Name
-        {
-            get
-            {
-                return getDisplayName();
-            }
         }
 
         public override bool canBeDropped()
@@ -71,7 +55,7 @@ namespace HarpOfYobaRedux
                 allInstruments = new Dictionary<string, Instrument>();
 
             this.animation = animation;
-            this.name = name;
+            this.Name = name;
             displayName = name;
             this.description = description;
             this.texture = texture;
@@ -79,8 +63,6 @@ namespace HarpOfYobaRedux
 
             if (allInstruments.ContainsKey(id))
                 allInstruments.Remove(id);
-
-            owned = false;
 
             allInstruments.Add(id,this);
         }
@@ -92,17 +74,15 @@ namespace HarpOfYobaRedux
 
         private void build(string id)
         {
-            name = allInstruments[id].name;
+            Name = allInstruments[id].Name;
             description = allInstruments[id].description;
             texture = allInstruments[id].texture;
             animation = allInstruments[id].animation;
             readyToPlay = true;
             cooldownTime = 60;
-            numAttachmentSlots = 1;
-            attachments = new SObject[numAttachmentSlots];
-            owned = true;
-            allInstruments[id].owned = true;
-            instantUse = true;
+            numAttachmentSlots.Value = 1;
+            attachments.SetCount(numAttachmentSlots);
+            InstantUse = true;
             instrumentID = id;
 
             if (allAdditionalSaveData == null)
@@ -124,7 +104,12 @@ namespace HarpOfYobaRedux
             SObject priorAttachement = null;
 
             if (attachments.Length > 0 && attachments[0] != null)
-                priorAttachement = (SheetMusic)attachments[0].getOne();
+            {
+                if (!(attachments[0] is SheetMusic))
+                    SaveHandler.RebuildAll(attachments[0], attachments);
+
+                    priorAttachement = (SObject) attachments[0].getOne();
+            }
 
             if (o is SheetMusic)
             {
@@ -162,24 +147,30 @@ namespace HarpOfYobaRedux
         public object getReplacement()
         {
             FishingRod replacement = new FishingRod(1);
-            replacement.upgradeLevel = -1;
-            replacement.attachments = attachments;
+            replacement.UpgradeLevel = -1;
+            if (attachments.Count > 0)
+            {
+                replacement.attachments.SetCount(1);
+                replacement.attachments[0] = attachments[0];
+            }
             return replacement;
         }
 
 
         public void rebuild(Dictionary<string, string> additionalSaveData, object replacement)
         {
-            build(additionalSaveData["id"]);
-            attachments = (replacement as Tool).attachments;
-            allInstruments[instrumentID].owned = true;
+            if (replacement is Tool t && t.attachments.Count > 0)
+            {
+                if (!(t.attachments[0] is SheetMusic))
+                    SaveHandler.RebuildAll(t.attachments[0], t.attachments);
+
+                attachments[0] = t.attachments[0];
+            }
 
             foreach (string key in additionalSaveData.Keys)
                 if (key != "id" && !allAdditionalSaveData.ContainsKey(key))
                     allAdditionalSaveData.Add(key, additionalSaveData[key]);
         }
-
-        public override string DisplayName { get => name; set => name = value; }
 
         public override string getDescription()
         {
@@ -191,11 +182,6 @@ namespace HarpOfYobaRedux
             SpriteFont smallFont = Game1.smallFont;
             int width = Game1.tileSize * 4 + Game1.tileSize / 4;
             return Game1.parseText(text, smallFont, width);
-        }
-
-        private string getDisplayName()
-        {
-            return name;
         }
 
         public override void DoFunction(GameLocation location, int x, int y, int power, StardewValley.Farmer who)
@@ -242,9 +228,9 @@ namespace HarpOfYobaRedux
             SheetMusic sheet = (SheetMusic)attachments[0];
 
             PyUtils.setDelayedAction(1000, animation.animate);
-            PyUtils.setDelayedAction(sheet.lenght / 2, doMagic);
-            PyUtils.setDelayedAction(sheet.lenght, resetMusic);
-            PyUtils.setDelayedAction(sheet.lenght + 1000, stop);
+            PyUtils.setDelayedAction(sheet.length / 2, doMagic);
+            PyUtils.setDelayedAction(sheet.length, resetMusic);
+            PyUtils.setDelayedAction(sheet.length + 1000, stop);
 
             animation.preAnimation();
             sheet.play();
@@ -270,7 +256,7 @@ namespace HarpOfYobaRedux
             return false;
         }
 
-        public override void drawInMenu(SpriteBatch spriteBatch, Vector2 location, float scaleSize, float transparency, float layerDepth, bool drawStackNumber)
+        public override void drawInMenu(SpriteBatch spriteBatch, Vector2 location, float scaleSize, float transparency, float layerDepth, bool drawStackNumber, Color color, bool drawShadow)
         {
             float alpha = 1.0f;
             int minutesTillReady = 0;
@@ -316,12 +302,17 @@ namespace HarpOfYobaRedux
 
         protected override string loadDisplayName()
         {
-            return name;
+            return Name;
         }
 
         protected override string loadDescription()
         {
-            return getDescription();
+            return description;
+        }
+
+        public ICustomObject recreate(Dictionary<string, string> additionalSaveData, object replacement)
+        {
+            return new Instrument(additionalSaveData["id"]);
         }
     }
 }

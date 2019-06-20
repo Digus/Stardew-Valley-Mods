@@ -1,19 +1,19 @@
-﻿using PyTK.Types;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace TMXLoader
 {
-    internal class TMXContentPack : IContentPack
+    internal class TMXContentPack
     {
-        public string name { get; set; } = "TMXContentPack";
-        public string version { get; set; } = "1.0.0";
-        public string author { get; set; } = "none";
-        public string folderName { get; set; } = "";
-        public string fileName { get; set; } = "";
         public List<MapEdit> addMaps { get; set; } = new List<MapEdit>();
         public List<MapEdit> replaceMaps { get; set; } = new List<MapEdit>();
         public List<MapEdit> mergeMaps { get; set; } = new List<MapEdit>();
+
+        public List<BuildableEdit> buildables { get; set; } = new List<BuildableEdit>();
         public List<MapEdit> onlyWarps { get; set; } = new List<MapEdit>();
+        public List<TileShop> shops { get; set; } = new List<TileShop>();
+        public List<SpouseRoom> spouseRooms { get; set; } = new List<SpouseRoom>();
+        public List<NPCPlacement> festivalSpots { get; set; } = new List<NPCPlacement>();
+        public List<NPCPlacement> placeNPCs { get; set; } = new List<NPCPlacement>();
         public List<string> scripts { get; set; } = new List<string>();
     }
 }

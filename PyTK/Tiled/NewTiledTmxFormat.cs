@@ -1,4 +1,5 @@
 ﻿using StardewModdingAPI;
+using StardewValley;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -121,6 +122,7 @@ namespace PyTK.Tiled
             }
             LoadTileSets(map);
             LoadLayers(map);
+            LoadImageLayers(map);
             LoadObjects(map);
             return map;
         }
@@ -163,11 +165,15 @@ namespace PyTK.Tiled
                 tiledMap2.Properties.Add(new TiledProperty(property.Key, property.Value));
             StoreTileSets(map, tiledMap2);
             StoreLayers(map, tiledMap2);
+            StoreImageLayers(map, tiledMap2);
             StoreObjects(map, tiledMap2);
             return tiledMap2.ToXml();
         }
 
-        
+        public void StoreImageLayers(Map map, TiledMap tiled)
+        {
+            
+        }
 
         public void LoadTileSets(Map map)
         {
@@ -215,6 +221,43 @@ namespace PyTK.Tiled
             tileSets.ForEach(action1);
         }
 
+        public void LoadImageLayers(Map map)
+        {
+            List<TiledImageLayer> layers = TiledMap.ImageLayers;
+
+            if (layers == null || layers.Count == 0)
+                return;
+
+            foreach (TiledImageLayer layer in layers)
+            {
+                Size imageSize = new Size(layer.ImageWidth, layer.ImageHeight);
+                TileSheet imagesheet = new TileSheet("zImageSheet_" + layer.Name, map, layer.Source, new Size(1,1), imageSize);
+                map.AddTileSheet(imagesheet);
+                Layer imageLayer = new Layer(layer.Name, map, map.Layers[0].LayerSize, map.Layers[0].TileSize);
+
+                List<TiledProperty> properties = layer.Properties;
+                if (properties != null)
+                {
+                    Action<TiledProperty> action2 = prop =>
+                    {
+                        if (prop.Name == "@Description")
+                            imageLayer.Description = prop.Value;
+                        else
+                            imageLayer.Properties[prop.Name] = prop.Value;
+                    };
+                    properties.ForEach(action2);
+                }
+
+                imageLayer.Visible = !layer.Hidden;
+                imageLayer.Properties["offsetx"] = layer.Horizontal * Game1.pixelZoom;
+                imageLayer.Properties["offsety"] = layer.Vertical * Game1.pixelZoom;
+                imageLayer.Properties["opacity"] = layer.Transparency;
+                imageLayer.Properties["isImageLayer"] = true;
+                
+                map.AddLayer(imageLayer);
+            }
+        }
+
         public void LoadLayers(Map map)
         {
             if (map.TileSheets.Count == 0)
@@ -243,8 +286,14 @@ namespace PyTK.Tiled
                    properties.ForEach(action2);
                }
                if (!(layer.Data.EncodingType == "csv"))
+               {
+                   Monitor.Log("Error: Change your encoding setting from " + layer.Data.EncodingType + " to CSV");
                    throw new Exception(string.Format("Unknown encoding setting ({0})", layer.Data.EncodingType));
+               }
                LoadLayerDataCsv(mapLayer, layer);
+               mapLayer.Properties["offsetx"] = (int) Math.Floor(layer.Horizontal * Game1.pixelZoom);
+               mapLayer.Properties["offsety"] = (int)Math.Floor(layer.Vertical * Game1.pixelZoom);
+               mapLayer.Properties["opacity"] = layer.Transparency;
                map.AddLayer(mapLayer);
            };
             layers.ForEach(action1);
@@ -329,9 +378,15 @@ namespace PyTK.Tiled
                            {
                                Tile tile = layer.Tiles[x, y];
                                List<TiledProperty> properties = tiledObject.Properties;
-                               if (properties != null)
+                               if (properties != null && tile != null)
                                {
-                                   Action<TiledProperty> action2 = prop => tile.Properties[prop.Name] = prop.Value;
+                                   Action<TiledProperty> action2 = prop =>
+                                   {
+                                       if (!tile.Properties.ContainsKey(prop.Name))
+                                           tile.Properties.Add(prop.Name, prop.Value);
+                                       else
+                                           tile.Properties[prop.Name] = prop.Value;
+                                   };
                                    properties.ForEach(action2);
                                }
                            }
@@ -346,6 +401,9 @@ namespace PyTK.Tiled
             int num = 1;
             foreach (TileSheet tileSheet in map.TileSheets)
             {
+                if (tileSheet.Id.StartsWith("zImageSheet_"))
+                    continue;
+
                 TiledTileSet tiledTileSet1 = new TiledTileSet();
                 tiledTileSet1.FirstGid = num;
                 string id = tileSheet.Id;
@@ -404,6 +462,9 @@ namespace PyTK.Tiled
         {
             foreach (Layer layer in map.Layers)
             {
+                if (layer.Properties.Keys.Contains("isImageLayer") && layer.Properties["isImageLayer"] == true)
+                    continue;
+
                 TiledLayer tiledLayer1 = new TiledLayer();
                 tiledLayer1.Name = layer.Id;
                 tiledLayer1.Width = layer.LayerWidth;

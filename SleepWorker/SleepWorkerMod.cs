@@ -3,7 +3,6 @@ using StardewModdingAPI;
 using StardewValley;
 using System.Threading;
 
-
 namespace SleepWorker
 {
     public class SleepWorkerMod : Mod
@@ -13,9 +12,14 @@ namespace SleepWorker
         public override void Entry(IModHelper helper)
         {
             config = helper.ReadConfig<Config>();
-            PyTK.Events.PyTimeEvents.BeforeSleepEvents += (s, e) => { if (!canSleep) { e.Response.responseKey = "No"; Thread tThread = new Thread(callTimeSkip); tThread.Start(); } };
+            PyTK.Events.PyTimeEvents.BeforeSleepEvents += (s, e) =>
+            {
+                if (!Game1.IsMultiplayer && !canSleep)
+                {
+                    e.Response.responseKey = "No"; Thread tThread = new Thread(callTimeSkip); tThread.Start();
+                }
+            };
         }
-
         public void callTimeSkip()
         {
             Game1.playSound("coin");

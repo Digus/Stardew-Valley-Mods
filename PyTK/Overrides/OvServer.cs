@@ -2,6 +2,8 @@
 using PyTK.CustomElementHandler;
 using StardewValley.Network;
 using System.Reflection;
+using System;
+using StardewValley;
 using StardewModdingAPI.Events;
 
 namespace PyTK.Overrides
@@ -18,62 +20,18 @@ namespace PyTK.Overrides
 
             internal static void Prefix()
             {
-                SaveHandler.Replace();
-            }
-
-            internal static void Postfix()
-            {
-                SaveHandler.Rebuild();
-                TimeEvents.TimeOfDayChanged += DelayedRebuild;
-            }
-
-            private static void DelayedRebuild(object sender, EventArgsIntChanged e)
-            {
-                SaveHandler.Rebuild();
-                TimeEvents.TimeOfDayChanged -= DelayedRebuild;
-            }
-        }
-
-
-
-        [HarmonyPatch]
-        internal class ServerFix2
-        {
-            internal static MethodInfo TargetMethod()
-            {
-                return AccessTools.Method(PyUtils.getTypeSDV("Network.GameServer"), "playerDisconnected");
-            }
-
-            internal static void Prefix()
-            {
+                if (Game1.IsMasterGame)
                     SaveHandler.Replace();
             }
 
             internal static void Postfix()
             {
-                    SaveHandler.Rebuild();
+                if (Game1.IsMasterGame)
+                    SaveHandler.RebuildFromActions();
             }
+
         }
-
-        [HarmonyPatch]
-        internal class ServerFix3
-        {
-            internal static MethodInfo TargetMethod()
-            {
-                return AccessTools.Method(PyUtils.getTypeSDV("Network.GameServer"), "processIncomingMessage");
-            }
-
-            internal static bool Prefix(IncomingMessage message)
-            {
-                if (message.MessageType == 99)
-                    PyNet.receiveMessage(message);
-                else
-                    return true;
-
-                return false;
-            }
-        }
-
+      
         [HarmonyPatch]
         internal class ServerFix4
         {
@@ -84,32 +42,14 @@ namespace PyTK.Overrides
 
             internal static void Prefix()
             {
-                SaveHandler.typeCheckCache.Clear();
-                SaveHandler.Replace();
+                if (Game1.IsMasterGame)
+                    SaveHandler.Replace();
             }
 
             internal static void Postfix()
             {
-                SaveHandler.Rebuild();
-            }
-        }
-
-        [HarmonyPatch]
-        internal class ClientFix1
-        {
-            internal static MethodInfo TargetMethod()
-            {
-                return AccessTools.Method(PyUtils.getTypeSDV("Network.Client"), "processIncomingMessage");
-            }
-
-            internal static bool Prefix(IncomingMessage message)
-            {
-                if (message.MessageType == 99)
-                    PyNet.receiveMessage(message);
-                else
-                    return true;
-
-                return false;
+                if (Game1.IsMasterGame)
+                    SaveHandler.RebuildFromActions();
             }
         }
     }

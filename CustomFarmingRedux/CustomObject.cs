@@ -19,7 +19,6 @@ namespace CustomFarmingRedux
         public PySync syncObject { get; set; }
         internal IModHelper Helper = CustomFarmingReduxMod._helper;
         internal IMonitor Monitor = CustomFarmingReduxMod._monitor;
-        internal string folder = CustomFarmingReduxMod.folder;
         internal List<CustomMachineBlueprint> machines = CustomFarmingReduxMod.machines;
 
         private RecipeBlueprint blueprint;
@@ -31,6 +30,8 @@ namespace CustomFarmingRedux
         private Rectangle tilesize = new Rectangle(0, 0, 16, 16);
         internal Rectangle sourceRectangle;
         private SObject input { get => heldObject.Value; set => heldObject.Value = value; }
+        internal static Type betterArtisanGoods = null;
+        internal static bool hasBetterArtisanGoods = false;
 
         public CustomObject()
         {
@@ -191,7 +192,7 @@ namespace CustomFarmingRedux
 
         public override Item getOne()
         {
-            return new CustomObject(ParentSheetIndex, Stack, _name, input, blueprint);
+            return new CustomObject(ParentSheetIndex, 1, _name, input, blueprint);
         }
 
         public override string DisplayName { get => cname; set => base.DisplayName = value; }
@@ -218,7 +219,7 @@ namespace CustomFarmingRedux
                 spriteBatch.Draw(Game1.mouseCursors, location + new Vector2(12f, (Game1.tileSize - 12) + num), new Microsoft.Xna.Framework.Rectangle?(quality < 4 ? new Rectangle(338 + (quality - 1) * 8, 400, 8, 8) : new Rectangle(346, 392, 8, 8)), Color.White * transparency, 0.0f, new Vector2(4f, 4f), (float)(3.0 * scaleSize * (1.0 + num)), SpriteEffects.None, layerDepth);
             }
 
-            if (System.Type.GetType("BetterArtisanGoodIcons.ArtisanGoodsManager, BetterArtisanGoodIcons") != null && input is SObject sobj && !sobj.bigCraftable.Value && (blueprint.suffix || blueprint.prefix || blueprint.insert))
+            if (hasBetterArtisanGoods && betterArtisanGoods != null && input is SObject sobj && !sobj.bigCraftable.Value && (blueprint.suffix || blueprint.prefix || blueprint.insert))
                 spriteBatch.Draw(Game1.objectSpriteSheet, location + new Vector2(10f * scaleSize, 10f * scaleSize), new Rectangle?(Game1.getSourceRectForStandardTileSheet(Game1.objectSpriteSheet, input.ParentSheetIndex, 16, 16)), Color.White * transparency, 0.0f, new Vector2(4f, 4f), 1.5f * scaleSize, SpriteEffects.None, layerDepth);
             
         }
@@ -239,7 +240,7 @@ namespace CustomFarmingRedux
         public Dictionary<string, string> getAdditionalSaveData()
         {
             Dictionary<string, string> data = new Dictionary<string, string>();
-            data.Add("mid", $"{mBlueprint.folder}.{mBlueprint.file}.{mBlueprint.id}");
+            data.Add("mid", mBlueprint.fullid);
             data.Add("id", blueprint.id.ToString());
             data.Add("name", _name);
             data.Add("stack", stack.ToString());

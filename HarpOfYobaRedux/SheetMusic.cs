@@ -8,16 +8,15 @@ using PyTK.Extensions;
 
 namespace HarpOfYobaRedux
 {
-    internal class SheetMusic : StardewValley.Object, ISaveElement
+    internal class SheetMusic : StardewValley.Object, ISaveElement, ICustomObject
     {
         internal static Dictionary<string, SheetMusic> allSheets;
         public string sheetMusicID;
         private string sheetDescription;
-        private bool owned;
         private Texture2D texture;
         private Color color;
         private string music;
-        public int lenght;
+        public int length;
         public IMagic magic;
         public bool playedToday;
  
@@ -27,13 +26,19 @@ namespace HarpOfYobaRedux
 
         }
 
-        public SheetMusic(string id, Texture2D texture, string name, string description, Color color, string music, int lenght, IMagic magic)
+        public SheetMusic(CustomObjectData data)
+            :this(data.id.Split('.')[2])
+        {
+
+        }
+
+        public SheetMusic(string id, Texture2D texture, string name, string description, Color color, string music, int length, IMagic magic)
         {
             if (allSheets == null)
                 allSheets = new Dictionary<string, SheetMusic>();
 
             this.magic = magic;
-            this.lenght = lenght;
+            this.length = length;
             this.texture = texture;
             this.color = color;
             this.music = music;
@@ -41,9 +46,7 @@ namespace HarpOfYobaRedux
             displayName = name;
             sheetDescription = description;
             sheetMusicID = id;
-
             allSheets.AddOrReplace(id, this);
-            owned = false;
         }
 
         public override string Name { get => name; }
@@ -62,17 +65,14 @@ namespace HarpOfYobaRedux
             color = allSheets[id].color;
             texture = allSheets[id].texture;
             music = allSheets[id].music;
-            lenght = allSheets[id].lenght;
+            length = allSheets[id].length;
             magic = allSheets[id].magic;
-            allSheets[id].owned = true;
-            owned = true;
             sheetMusicID = id;
             playedToday = false;
         }
 
         public void rebuild(Dictionary<string, string> additionalSaveData, object replacement)
         {
-            build(additionalSaveData["id"]);
         }
 
         public override bool canBeDropped()
@@ -88,11 +88,6 @@ namespace HarpOfYobaRedux
         public override bool canBeTrashed()
         {
             return false;
-        }
-
-        public static bool hasSheet(string id)
-        {
-           return allSheets[id].owned;
         }
 
         public override string getDescription()
@@ -115,12 +110,6 @@ namespace HarpOfYobaRedux
             return new StardewValley.Object(685,1); 
         }
 
-        public static void beforeRebuilding()
-        {
-            foreach (SheetMusic sheet in allSheets.Values)
-                sheet.owned = false;
-        }
-
         public override Item getOne()
         {
             return new SheetMusic(sheetMusicID);
@@ -140,12 +129,12 @@ namespace HarpOfYobaRedux
             Game1.changeMusicTrack(music);
         }
 
-        public override void drawInMenu(SpriteBatch spriteBatch, Vector2 location, float scaleSize, float transparency, float layerDepth, bool drawStackNumber)
+        public override void drawInMenu(SpriteBatch spriteBatch, Vector2 location, float scaleSize, float transparency, float layerDepth, bool drawStackNumber, Color color, bool drawShadow)
         {
             Rectangle sourceRectangle = new Rectangle(0, 0, 16, 16);
             spriteBatch.Draw(texture, location + new Vector2((Game1.tileSize / 2), (Game1.tileSize / 2)), new Rectangle?(sourceRectangle), Color.White * transparency, 0.0f, new Vector2(8, 8), Game1.pixelZoom * scaleSize * 0.8f, SpriteEffects.None, layerDepth);
             Rectangle sourceRectangleNote = new Rectangle(16, 0, 16, 16);
-            spriteBatch.Draw(texture, location + new Vector2((Game1.tileSize / 2), (Game1.tileSize / 2)), new Rectangle?(sourceRectangleNote), color * transparency, 0.0f, new Vector2(8, 8), Game1.pixelZoom * scaleSize * 0.8f, SpriteEffects.None, layerDepth);
+            spriteBatch.Draw(texture, location + new Vector2((Game1.tileSize / 2), (Game1.tileSize / 2)), new Rectangle?(sourceRectangleNote), this.color * transparency, 0.0f, new Vector2(8, 8), Game1.pixelZoom * scaleSize * 0.8f, SpriteEffects.None, layerDepth);
         }
 
         public override void drawWhenHeld(SpriteBatch spriteBatch, Vector2 objectPosition, StardewValley.Farmer f)
@@ -156,5 +145,9 @@ namespace HarpOfYobaRedux
             spriteBatch.Draw(texture, objectPosition, new Rectangle?(sourceRectangleNote), color, 0.0f, Vector2.Zero, Game1.pixelZoom, SpriteEffects.None, Math.Max(0.0f, (float)(f.getStandingY() + 3) / 10000f));
         }
 
+        public ICustomObject recreate(Dictionary<string, string> additionalSaveData, object replacement)
+        {
+            return new SheetMusic(additionalSaveData["id"]);
+        }
     }
 }

@@ -8,12 +8,15 @@ using StardewValley;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 
 namespace FarmHub
 {
     public class FarmHubServer
     {
         public string InviteCode { get; set; }
+        public string IP { get; set; }
         public string Name { get; set; }
         public int MaxPlayers { get; set; }
         public int CurrentPlayers { get; set; }
@@ -30,7 +33,7 @@ namespace FarmHub
 
         }
 
-        public void Update(object sender = null, EventArgsIntChanged e = null)
+        public void Update(object sender = null, TimeChangedEventArgs e = null)
         {
             Multiplayer multiplayer = (Multiplayer)typeof(Game1).GetField("multiplayer", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
             MaxPlayers = multiplayer.MaxPlayers;
@@ -39,31 +42,40 @@ namespace FarmHub
             if (CurrentPlayers >= MaxPlayers)
                 Dispose();
             else
-            {
-                Monitor.Log("Updating FarmHubServer");
                 Task.Run(() => farms.Child(Id).PutAsync(this));
-            }
+            
+        }
+
+        public static string GetLocalIPAddress()
+        {
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    return ip.ToString();
+
+            return "na";
         }
 
         public FarmHubServer(IGameServer server, IMonitor monitor)
         {
             Monitor = monitor;
-            InviteCode = server.getInviteCode(); ;
+            InviteCode = server.getInviteCode();
+            IP = FarmHubMod.config.UseIP ? GetLocalIPAddress() : "na";
             Name = Game1.player.farmName.Value;
             Password = FarmHubMod.password.toMD5Hash();
             Guid = FarmHubMod.guid;
-            TimeEvents.TimeOfDayChanged += Update;
-            SaveEvents.AfterReturnToTitle += DelistServer;
+            FarmHubMod.events.GameLoop.TimeChanged += Update;
+            FarmHubMod.events.GameLoop.ReturnedToTitle += DelistServer;
             Id = "Farm_" + Name + "_" + Guid;
             RequiredMods = FarmHubMod.requiredMods;
             Update();
         }
 
-        private void DelistServer(object sender = null, EventArgs e = null)
+        private void DelistServer(object sender = null, ReturnedToTitleEventArgs e = null)
         {
             Monitor.Log("Delisting FarmHubServer");
-            TimeEvents.TimeOfDayChanged -= Update;
-            SaveEvents.AfterReturnToTitle -= DelistServer;
+            FarmHubMod.events.GameLoop.TimeChanged -= Update;
+            FarmHubMod.events.GameLoop.ReturnedToTitle -= DelistServer;
             Task.Run(() => farms.Child(Id).DeleteAsync());
             FarmHubMod.myServer = null;
         }

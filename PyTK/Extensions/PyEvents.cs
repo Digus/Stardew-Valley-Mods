@@ -4,19 +4,18 @@ using SObject = StardewValley.Object;
 using StardewValley.Menus;
 using StardewValley.Objects;
 using System;
-using Microsoft.Xna.Framework.Input;
 using StardewValley.TerrainFeatures;
 using StardewValley;
 using PyTK.Types;
 using System.Collections.Generic;
 using System.Linq;
-using System.Collections.Specialized;
 using Microsoft.Xna.Framework;
 
 namespace PyTK.Extensions
 {
     public static class PyEvents
     {
+        private static IModEvents Events { get; } = PyTKMod._events;
         internal static IModHelper Helper { get; } = PyTKMod._helper;
         internal static IMonitor Monitor { get; } = PyTKMod._monitor;
 
@@ -181,71 +180,71 @@ namespace PyTK.Extensions
 
         /* Menu */
 
-        /// <summary>Wraps the the method so it only executes if a menu of the requested type opens and adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Wraps the the method so it only executes if a menu of the requested type opens and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> onActivation<T>(this IClickableMenu t, EventHandler<EventArgsClickableMenuChanged> handler) where T : IClickableMenu
+        public static EventHandler<MenuChangedEventArgs> onActivation<T>(this IClickableMenu t, EventHandler<MenuChangedEventArgs> handler) where T : IClickableMenu
         {
-            EventHandler<EventArgsClickableMenuChanged> d = delegate (object sender, EventArgsClickableMenuChanged e)
+            EventHandler<MenuChangedEventArgs> d = delegate (object sender, MenuChangedEventArgs e)
             {
                 if (e.NewMenu is T)
                     handler.Invoke(sender, e);
             };
 
-            MenuEvents.MenuChanged += d;
+            PyEvents.Events.Display.MenuChanged += d;
 
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if a menu of the requested type opens and adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Wraps the the method so it only executes if a menu of the requested type opens and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> onActivation<T>(this IClickableMenu t, Action<T> action) where T : IClickableMenu
+        public static EventHandler<MenuChangedEventArgs> onActivation<T>(this IClickableMenu t, Action<T> action) where T : IClickableMenu
         {
-            EventHandler<EventArgsClickableMenuChanged> d = delegate (object sender, EventArgsClickableMenuChanged e)
+            EventHandler<MenuChangedEventArgs> d = delegate (object sender, MenuChangedEventArgs e)
             {
                 if (e.NewMenu is T)
                     action.Invoke((T) e.NewMenu);
             };
 
-            MenuEvents.MenuChanged += d;
+            PyEvents.Events.Display.MenuChanged += d;
 
             return d;
         }
 
         /// <summary>Wraps the the method so it only executes if a menu of the requested type closes and adds it to MenuEvents.MenuClosed.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsClickableMenuClosed> onClose<T>(this IClickableMenu t, EventHandler<EventArgsClickableMenuClosed> handler) where T : IClickableMenu
+        public static EventHandler<MenuChangedEventArgs> onClose<T>(this IClickableMenu t, EventHandler<MenuChangedEventArgs> handler) where T : IClickableMenu
         {
-            EventHandler<EventArgsClickableMenuClosed> d = delegate (object sender, EventArgsClickableMenuClosed e)
+            EventHandler<MenuChangedEventArgs> d = delegate (object sender, MenuChangedEventArgs e)
             {
-                if (e.PriorMenu is T)
+                if (e.OldMenu is T)
                     handler.Invoke(sender, e);
             };
 
-            MenuEvents.MenuClosed += d;
+            PyEvents.Events.Display.MenuChanged += d;
 
             return d;
         }
 
         /// <summary>Wraps the the method so it only executes if a menu of the requested type closes and adds it to MenuEvents.MenuClosed.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsClickableMenuClosed> onClose<T>(this IClickableMenu t, Action<T> action) where T : IClickableMenu
+        public static EventHandler<MenuChangedEventArgs> onClose<T>(this IClickableMenu t, Action<T> action) where T : IClickableMenu
         {
-            EventHandler<EventArgsClickableMenuClosed> d = delegate (object sender, EventArgsClickableMenuClosed e)
+            EventHandler<MenuChangedEventArgs> d = delegate (object sender, MenuChangedEventArgs e)
             {
-                if (e.PriorMenu is T)
-                    action.Invoke((T) e.PriorMenu);
+                if (e.OldMenu is T oldMenu)
+                    action.Invoke(oldMenu);
             };
 
-            MenuEvents.MenuClosed += d;
+            PyEvents.Events.Display.MenuChanged += d;
 
             return d;
         }
 
-        /// <summary>Generates a method that adds this inventory to a shop that matches the defined conditions and adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Generates a method that adds this inventory to a shop that matches the defined conditions and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> addToShop(this List<InventoryItem> inventory, Func<ShopMenu, bool> predicate)
+        public static EventHandler<MenuChangedEventArgs> addToShop(this List<InventoryItem> inventory, Func<ShopMenu, bool> predicate)
         {
-            EventHandler<EventArgsClickableMenuChanged> d = delegate (object sender, EventArgsClickableMenuChanged e)
+            EventHandler<MenuChangedEventArgs> d = delegate (object sender, MenuChangedEventArgs e)
             {
                 ShopMenu shop = (ShopMenu)e.NewMenu;
                 List<Item> forSale = shop.getForSale();
@@ -259,37 +258,45 @@ namespace PyTK.Extensions
             return Game1.activeClickableMenu.onActivation<ShopMenu>(d);
         }
 
-        /// <summary>Generates a method that adds this inventory to a shop of an NPC adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Generates a method that adds this inventory to a shop of an NPC adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> addToNPCShop(this List<InventoryItem> items, string shopkeeper)
+        public static EventHandler<MenuChangedEventArgs> addToNPCShop(this List<InventoryItem> items, string shopkeeper)
         {
             return items.addToShop((shop) => shop.portraitPerson.Name == shopkeeper);
         }
 
-        /// <summary>Generates a method that adds this inventory to the furniture catalogue and adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Generates a method that adds this inventory to the furniture catalogue and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> addToFurnitureCatalogue(this List<InventoryItem> items)
+        public static EventHandler<MenuChangedEventArgs> addToFurnitureCatalogue(this List<InventoryItem> items)
         {
             return items.addToShop(p => p.isFurnitureCataogue());
         }
 
-        /// <summary>Generates a method that adds this inventory to the hat shop and adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Generates a method that adds this inventory to the wallpaper catalogue and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> addToHatShop(this List<InventoryItem> items)
+        public static EventHandler<MenuChangedEventArgs> addToWallpaperCatalogue(this List<InventoryItem> items)
+        {
+            return items.addToShop(p => p.isWallpaperCatalogue());
+        }
+
+
+        /// <summary>Generates a method that adds this inventory to the hat shop and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
+        /// <returns>Returns the method.</returns>
+        public static EventHandler<MenuChangedEventArgs> addToHatShop(this List<InventoryItem> items)
         {
             return items.addToShop(p => p.isHatShop());
         }
 
-        /// <summary>Generates a method that adds this inventory to a shop that matches the defined conditions and adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Generates a method that adds this inventory to a shop that matches the defined conditions and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> addToShop(this InventoryItem inventory, Func<ShopMenu, bool> predicate)
+        public static EventHandler<MenuChangedEventArgs> addToShop(this InventoryItem inventory, Func<ShopMenu, bool> predicate)
         {
-            EventHandler<EventArgsClickableMenuChanged> d = delegate (object sender, EventArgsClickableMenuChanged e)
+            EventHandler<MenuChangedEventArgs> d = delegate (object sender, MenuChangedEventArgs e)
             {
                 ShopMenu shop = (ShopMenu)e.NewMenu;
                 List<Item> forSale = shop.getForSale();
                 Dictionary<Item, int[]> priceAndStock = shop.getItemPriceAndStock();
-                forSale.Add(inventory.item);
+                forSale.AddOrReplace(inventory.item);
                 priceAndStock.AddOrReplace(inventory.item, new int[] { inventory.price, inventory.stock });
             };
 
@@ -298,23 +305,37 @@ namespace PyTK.Extensions
             return Game1.activeClickableMenu.onActivation<ShopMenu>(d);
         }
 
-        /// <summary>Generates a method that adds this inventory to a shop of an NPC adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Generates a method that adds this inventory to a shop of an NPC adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> addToNPCShop(this InventoryItem item, string shopkeeper)
+        public static EventHandler<MenuChangedEventArgs> addToNPCShop(this InventoryItem item, string shopkeeper)
         {
             return item.addToShop((shop) => shop.portraitPerson is NPC npc && npc.Name == shopkeeper);
         }
 
-        /// <summary>Generates a method that adds this inventory to the furniture catalogue and adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Generates a method that adds this inventory to a shop of an NPC adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> addToFurnitureCatalogue(this InventoryItem item)
+        public static EventHandler<MenuChangedEventArgs> addToNPCShop(this InventoryItem item, string shopkeeper, string conditions)
+        {
+            return item.addToShop((shop) => shop.portraitPerson is NPC npc && npc.Name == shopkeeper && PyUtils.CheckEventConditions(conditions));
+        }
+
+        /// <summary>Generates a method that adds this inventory to the furniture catalogue and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
+        /// <returns>Returns the method.</returns>
+        public static EventHandler<MenuChangedEventArgs> addToFurnitureCatalogue(this InventoryItem item)
         {
             return item.addToShop(p => p.isFurnitureCataogue());
         }
 
-        /// <summary>Generates a method that adds this inventory to the hat shop and adds it to MenuEvents.MenuChanged.</summary>
+        /// <summary>Generates a method that adds this inventory to the wallpaper catalogue and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the method.</returns>
-        public static EventHandler<EventArgsClickableMenuChanged> addToHatShop(this InventoryItem item)
+        public static EventHandler<MenuChangedEventArgs> addToWallpaperCatalogue(this InventoryItem item)
+        {
+            return item.addToShop(p => p.isWallpaperCatalogue());
+        }
+
+        /// <summary>Generates a method that adds this inventory to the hat shop and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
+        /// <returns>Returns the method.</returns>
+        public static EventHandler<MenuChangedEventArgs> addToHatShop(this InventoryItem item)
         {
             return item.addToShop(p => p.isHatShop());
         }
@@ -391,271 +412,277 @@ namespace PyTK.Extensions
             return d;
         }
 
-
-
         /* Input */
 
-        /// <summary>Wraps the the method so it only executes if a specific Key is pressed and adds it to ControlEvents.KeyPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if a specific Key is pressed and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsKeyPressed> onPressed(this Keys k, EventHandler<EventArgsKeyPressed> handler)
+        public static EventHandler<ButtonPressedEventArgs> onPressed(this SButton k, EventHandler<ButtonPressedEventArgs> handler)
         {
-            EventHandler<EventArgsKeyPressed> d = delegate (object sender, EventArgsKeyPressed e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                if (e.KeyPressed == k)
+                if (e.Button == k)
                     handler.Invoke(sender, e);
             };
 
-            ControlEvents.KeyPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
 
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if a specific Key is pressed and adds it to ControlEvents.KeyPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if a specific Key is pressed and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsKeyPressed> onPressed(this Keys k, Action action)
+        public static EventHandler<ButtonPressedEventArgs> onPressed(this SButton k, Action action)
         {
-            EventHandler<EventArgsKeyPressed> d = delegate (object sender, EventArgsKeyPressed e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                if (e.KeyPressed == k)
+                if (e.Button == k)
                     action.Invoke();
             };
 
-            ControlEvents.KeyPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
 
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if the player clicks on the specified tileposition and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if the player clicks on the specified tileposition and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onClick(this ButtonClick t, TileLocationSelector tile, Action<Vector2> handler)
+        public static EventHandler<ButtonPressedEventArgs> onClick(this ButtonClick t, TileLocationSelector tile, Action<Vector2> handler)
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton && Game1.currentLocation is GameLocation location && tile.predicate(location,location.getTileAtMousePosition()))
                     handler.Invoke(location.getTileAtMousePosition());
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if the player clicks on the specified on a position that matches the predicate adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if the player clicks on the specified on a position that matches the predicate adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onClick(this ButtonClick t, Func<Point,bool> predicate, Action<Point> handler)
+        public static EventHandler<ButtonPressedEventArgs> onClick(this ButtonClick t, Func<Point,bool> predicate, Action<Point> handler)
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 Point mousePosition = Game1.getMousePosition();
                 if (isButton && predicate.Invoke(mousePosition))
                     handler.Invoke(mousePosition);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if the player clicks on the screen position and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if the player clicks on the screen position and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onClick(this ButtonClick t, Point position, Action<Point> handler)
+        public static EventHandler<ButtonPressedEventArgs> onClick(this ButtonClick t, Point position, Action<Point> handler)
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 Point mousePosition = Game1.getMousePosition();
                 if (isButton && mousePosition == position)
                     handler.Invoke(position);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if the player clicks on the screen area and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if the player clicks on the screen area and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onClick(this ButtonClick t, Rectangle area, Action<Point> handler)
+        public static EventHandler<ButtonPressedEventArgs> onClick(this ButtonClick t, Rectangle area, Action<Point> handler)
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 Point mousePosition = Game1.getMousePosition();
                 if (isButton && area.Contains(mousePosition))
                     handler.Invoke(mousePosition);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if the player clicks on the specified tile and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if the player clicks on the specified tile and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onClick(this ButtonClick t, Vector2 tile, GameLocation location, Action<Vector2> handler)
+        public static EventHandler<ButtonPressedEventArgs> onClick(this ButtonClick t, Vector2 tile, GameLocation location, Action<Vector2> handler)
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton && Game1.currentLocation == location && location.getTileAtMousePosition() == tile)
                     handler.Invoke(location.getTileAtMousePosition());
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
 
-        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onObjectClick<T>(this ButtonClick t, EventHandler<T> handler) where T : SObject
+        public static EventHandler<ButtonPressedEventArgs> onObjectClick<T>(this ButtonClick t, EventHandler<T> handler) where T : SObject
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton && Game1.currentLocation is GameLocation location && location.getTileAtMousePosition().sObjectOnMap<T>() is T obj)
                     handler.Invoke(sender, obj);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onObjectClick<T>(this ButtonClick t, Action<T> handler) where T : SObject
+        public static EventHandler<ButtonPressedEventArgs> onObjectClick<T>(this ButtonClick t, Action<T> handler) where T : SObject
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton && Game1.currentLocation is GameLocation location && location.getTileAtMousePosition().sObjectOnMap<T>() is T obj)
                         handler.Invoke(obj);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onTerrainClick<T>(this ButtonClick t, Action<T> handler) where T : TerrainFeature
+        public static EventHandler<ButtonPressedEventArgs> onTerrainClick<T>(this ButtonClick t, Action<T> handler) where T : TerrainFeature
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton && Game1.currentLocation is GameLocation location && location.getTileAtMousePosition().terrainOnMap<T>() is T obj)
                     handler.Invoke(obj);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onTerrainClick<T>(this ButtonClick t, EventHandler<T> handler) where T : TerrainFeature
+        public static EventHandler<ButtonPressedEventArgs> onTerrainClick<T>(this ButtonClick t, EventHandler<T> handler) where T : TerrainFeature
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton && Game1.currentLocation is GameLocation location && location.getTileAtMousePosition().terrainOnMap<T>() is T obj)
                     handler.Invoke(sender, obj);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onFurnitureClick<T>(this ButtonClick t, EventHandler<T> handler) where T : Furniture
+        public static EventHandler<ButtonPressedEventArgs> onFurnitureClick<T>(this ButtonClick t, EventHandler<T> handler) where T : Furniture
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton && Game1.currentLocation is GameLocation location && location.getTileAtMousePosition().furnitureOnMap<T>() is T obj)
                     handler.Invoke(sender, obj);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if an object of the requested type is clicked on and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onFurnitureClick<T>(this ButtonClick t, Action<T> handler) where T : Furniture
+        public static EventHandler<ButtonPressedEventArgs> onFurnitureClick<T>(this ButtonClick t, Action<T> handler) where T : Furniture
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton && Game1.currentLocation is GameLocation location && location.getTileAtMousePosition().furnitureOnMap<T>() is T obj)
                     handler.Invoke(obj);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if this button is pressed and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if this button is pressed and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onClick(this ButtonClick t, EventHandler<EventArgsInput> handler)
+        public static EventHandler<ButtonPressedEventArgs> onClick(this ButtonClick t, EventHandler<ButtonPressedEventArgs> handler)
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton)
                     handler.Invoke(sender, e);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if this button is pressed and adds it to InputEvents.ButtonPressed.</summary>
+        /// <summary>Wraps the the method so it only executes if this button is pressed and adds it to <see cref="IInputEvents.ButtonPressed"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInput> onClick(this ButtonClick t, Action<EventArgsInput> handler)
+        public static EventHandler<ButtonPressedEventArgs> onClick(this ButtonClick t, Action<ButtonPressedEventArgs> handler)
         {
-            EventHandler<EventArgsInput> d = delegate (object sender, EventArgsInput e)
+            EventHandler<ButtonPressedEventArgs> d = delegate (object sender, ButtonPressedEventArgs e)
             {
-                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.IsUseToolButton : e.IsActionButton;
+                bool isButton = t.Equals(ButtonClick.UseToolButton) ? e.Button.IsUseToolButton() : e.Button.IsActionButton();
                 if (isButton)
                     handler.Invoke(e);
             };
 
-            InputEvents.ButtonPressed += d;
+            PyEvents.Events.Input.ButtonPressed += d;
             return d;
         }
 
 
         /* Objects */
 
-        /// <summary>Wraps the the method so it only executes if objects of the requested type are added to the players inventory and adds it to PlayerEvents.InventoryChanged.</summary>
+        /// <summary>Wraps the the method so it only executes if objects of the requested type are added to the players inventory and adds it to <see cref="IPlayerEvents.InventoryChanged"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInventoryChanged> whenAddedToInventory<T>(this ItemSelector<T> t, EventHandler<List<T>> handler) where T : Item
+        public static EventHandler<InventoryChangedEventArgs> whenAddedToInventory<TItem>(this ItemSelector<TItem> t, EventHandler<List<TItem>> handler) where TItem : Item
         {
-            EventHandler<EventArgsInventoryChanged> d = delegate (object sender, EventArgsInventoryChanged e)
+            EventHandler<InventoryChangedEventArgs> d = delegate (object sender, InventoryChangedEventArgs e)
             {
-                if (e.Added.Exists(p => p.Item is T && t.predicate((T) p.Item)))
-                    handler.Invoke(sender, e.Added.FindAll(p => p.Item is T && t.predicate((T) p.Item)).ConvertAll(p => (T) p.Item));
+                if (e.IsLocalPlayer)
+                {
+                    List<TItem> items = e.Added.OfType<TItem>().Where(p => t.predicate(p)).ToList();
+                    if (items.Any())
+                        handler.Invoke(sender, items);
+                }
             };
 
-            PlayerEvents.InventoryChanged += d;
+            PyEvents.Events.Player.InventoryChanged += d;
 
             return d;
         }
 
-        /// <summary>Wraps the the method so it only executes if objects of the requested type are added to the players inventory and adds it to PlayerEvents.InventoryChanged.</summary>
+        /// <summary>Wraps the the method so it only executes if objects of the requested type are added to the players inventory and adds it to <see cref="IPlayerEvents.InventoryChanged"/>.</summary>
         /// <returns>Returns the wrapped method.</returns>
-        public static EventHandler<EventArgsInventoryChanged> whenAddedToInventory<T>(this ItemSelector<T> t, Action<List<T>> action) where T : Item
+        public static EventHandler<InventoryChangedEventArgs> whenAddedToInventory<TItem>(this ItemSelector<TItem> t, Action<List<TItem>> action) where TItem : Item
         {
-            EventHandler<EventArgsInventoryChanged> d = delegate (object sender, EventArgsInventoryChanged e)
+            EventHandler<InventoryChangedEventArgs> d = delegate (object sender, InventoryChangedEventArgs e)
             {
-                if (e.Added.Exists(p => p.Item is T && t.predicate((T) p.Item)))
-                    action.Invoke(e.Added.FindAll(p => p.Item is T && t.predicate((T) p.Item)).ConvertAll(p => (T) p.Item));
+                if (e.IsLocalPlayer)
+                {
+                    List<TItem> items = e.Added.OfType<TItem>().Where(p => t.predicate(p)).ToList();
+                    if (items.Any())
+                        action.Invoke(items);
+                }
             };
 
-            PlayerEvents.InventoryChanged += d;
+            PyEvents.Events.Player.InventoryChanged += d;
 
             return d;
-        }    
+        }
 
         /*
         public static Dictionary<GameLocation, NotifyCollectionChangedEventHandler> whenAddedToLocation<T>(this ItemSelector<T> t, Action<GameLocation,List<Vector2>> action, GameLocation l = null) where T : SObject
@@ -745,28 +772,28 @@ namespace PyTK.Extensions
 
         /* Locations */
         
-        public static EventHandler<EventArgsPlayerWarped> onEntry(this GameLocation t, EventHandler<EventArgsPlayerWarped> handler)
+        public static EventHandler<WarpedEventArgs> onEntry(this GameLocation location, EventHandler<WarpedEventArgs> handler)
         {
-            EventHandler<EventArgsPlayerWarped> d = delegate (object sender, EventArgsPlayerWarped e)
+            EventHandler<WarpedEventArgs> d = delegate (object sender, WarpedEventArgs e)
             {
-                if (e.NewLocation == t)
+                if (e.IsLocalPlayer && e.NewLocation == location)
                     handler.Invoke(sender, e);
             };
 
-            PlayerEvents.Warped += d;
+            PyEvents.Events.Player.Warped += d;
 
             return d;
         }
 
-        public static EventHandler<EventArgsPlayerWarped> onExit(this GameLocation t, EventHandler<EventArgsPlayerWarped> handler)
+        public static EventHandler<WarpedEventArgs> onExit(this GameLocation t, EventHandler<WarpedEventArgs> handler)
         {
-            EventHandler<EventArgsPlayerWarped> d = delegate (object sender, EventArgsPlayerWarped e)
+            EventHandler<WarpedEventArgs> d = delegate (object sender, WarpedEventArgs e)
             {
-                if (e.PriorLocation == t)
+                if (e.IsLocalPlayer && e.OldLocation == t)
                     handler.Invoke(sender, e);
             };
 
-            PlayerEvents.Warped += d;
+            PyEvents.Events.Player.Warped += d;
 
             return d;
         }

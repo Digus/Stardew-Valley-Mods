@@ -1,7 +1,6 @@
 ﻿using Harmony;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
-using Microsoft.Xna.Framework.Input;
 using PyTK.Extensions;
 using StardewValley;
 using Microsoft.Xna.Framework;
@@ -15,54 +14,25 @@ namespace ArcadePong
 {
     public class ArcadePongMod : Mod
     {
-        internal static IModHelper pongHelper;
         internal static IMonitor monitor;
         internal static Mod pong;
-        internal static List<EventHandler<EventArgsKeyPressed>> keyEvents = new List<EventHandler<EventArgsKeyPressed>>();
-        internal CustomObjectData pdata; 
+        internal static List<EventHandler<ButtonPressedEventArgs>> keyEvents = new List<EventHandler<ButtonPressedEventArgs>>();
+        internal CustomObjectData pdata;
+        internal static bool runPong = false;
 
 
         public override void Entry(IModHelper helper)
         {
             monitor = Monitor;
             HarmonyInstance.Create("Platonymous.ArcadePong").PatchAll(Assembly.GetExecutingAssembly());
-            SaveEvents.AfterLoad += (o, e) => setup();
-            SaveEvents.AfterReturnToTitle += (s, o) =>
-            {
-                foreach (EventHandler<EventArgsKeyPressed> a in keyEvents)
-                    ControlEvents.KeyPressed -= a;
-            };
+            helper.Events.GameLoop.SaveLoaded += (o, e) => setup();
             pdata = new CustomObjectData("Pong", "Pong/0/-300/Crafting -9/Play 'Pong by Cat' at home!/true/true/0/Pong", Game1.bigCraftableSpriteSheet.getTile(159, 16, 32).setSaturation(0).setLight(130), Color.Yellow, bigCraftable: true, type: typeof(PongMachine));
            
         }
 
         private void setup()
         {
-            new InventoryItem(pdata.getObject(), 0, 1).addToFurnitureCatalogue();
-            PongMinigame.game = Helper.Reflection.GetField<object>(pong, "game").GetValue();
-            pongHelper = (IModHelper)typeof(Mod).GetProperty("Helper", BindingFlags.Public | BindingFlags.Instance).GetValue(pong);
-            keyEvents.AddOrReplace(Keys.Space.onPressed(() =>
-            {
-                if (Game1.currentMinigame is PongMinigame p)
-                    Helper.Reflection.GetMethod(PongMinigame.game, "Start").Invoke();
-            }));
-
-            keyEvents.AddOrReplace(Keys.Escape.onPressed(() =>
-            {
-                if (Game1.currentMinigame is PongMinigame p)
-                    if (Helper.Reflection.GetMethod(PongMinigame.game, "HasStarted").Invoke<bool>())
-                        PongMinigame.game.GetType().GetMethod("Reset", new Type[] { }).Invoke(PongMinigame.game, null);
-                    else
-                    {
-                        PongMinigame.quit = true;
-                        Game1.options.zoomLevel = PongMachine.zoom;
-                    }
-            }));
-            keyEvents.AddOrReplace(Keys.P.onPressed(() =>
-            {
-                if (Game1.currentMinigame is PongMinigame p)
-                    Helper.Reflection.GetMethod(PongMinigame.game, "TogglePaused").Invoke();
-            }));
+            new InventoryItem(pdata.getObject(), 5000, 1).addToNPCShop("Gus");
         }
     }
 
@@ -71,14 +41,13 @@ namespace ArcadePong
     {
         internal static MethodInfo TargetMethod()
         {
-                return AccessTools.Method(Type.GetType("Pong.ModEntry, Pong"), "ButtonPressed");
+                return AccessTools.Method(Type.GetType("Pong.ModEntry, Pong"), "OnButtonPressed");
         }
 
-        internal static void Prefix(Mod __instance, ref EventArgsInput e)
+        internal static bool Prefix(Mod __instance, ButtonReleasedEventArgs e)
         {
             ArcadePongMod.pong = __instance;
-    
-            e = new EventArgsInput(SButton.A, e.Cursor, new HashSet<SButton>());
+            return ArcadePongMod.runPong;
         }
     }
 
@@ -87,13 +56,48 @@ namespace ArcadePong
     {
         internal static MethodInfo TargetMethod()
         {
-            return AccessTools.Method(Type.GetType("Pong.ModEntry, Pong"), "OnPostRender");
+            return AccessTools.Method(Type.GetType("Pong.ModEntry, Pong"), "OnRendered");
         }
 
         internal static bool Prefix(Mod __instance)
         {
             ArcadePongMod.pong = __instance;
             return false;
+        }
+    }
+
+    [HarmonyPatch]
+    internal class StopPong3
+    {
+        internal static MethodInfo TargetMethod()
+        {
+            return AccessTools.Method(Type.GetType("Pong.ModEntry, Pong"), "OnCursorMoved");
+        }
+
+        internal static bool Prefix(Mod __instance)
+        {
+            ArcadePongMod.pong = __instance;
+            return ArcadePongMod.runPong;
+        }
+    }
+
+    [HarmonyPatch]
+    internal class StopPong4
+    {
+        internal static MethodInfo TargetMethod()
+        {
+            return AccessTools.Method(Type.GetType("Pong.ModEntry, Pong"), "SwitchToNewMenu");
+        }
+
+        internal static void Postfix()
+        {
+            if (Game1.quit)
+            {
+                Game1.quit = false;
+                ArcadePongMod.runPong = false; ;
+                PongMinigame.quit = true;
+                Game1.options.zoomLevel = PongMachine.zoom;
+            }
         }
     }
 
