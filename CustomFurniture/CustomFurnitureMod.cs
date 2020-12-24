@@ -12,6 +12,7 @@ using Harmony;
 using System.Reflection;
 using Microsoft.Xna.Framework.Graphics;
 using PyTK.Extensions;
+using PyTK.Types;
 
 namespace CustomFurniture
 {
@@ -19,7 +20,7 @@ namespace CustomFurniture
     {
         internal static IModHelper helper;
         internal static Dictionary<string,CustomFurniture> furniture = new Dictionary<string, CustomFurniture>();
-        private static Dictionary<string, CustomFurniture> furniturePile = new Dictionary<string, CustomFurniture>();
+        internal static Dictionary<string, CustomFurniture> furniturePile = new Dictionary<string, CustomFurniture>();
         public static Mod instance;
 
         public override void Entry(IModHelper helper)
@@ -34,10 +35,21 @@ namespace CustomFurniture
             {
                 Monitor.Log("Harmony Error: Custom deco won't work on tables." + e.StackTrace, LogLevel.Error);
             }
-            loadPacks();
+            helper.Events.GameLoop.GameLaunched += GameLoop_GameLaunched;
             helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
             helper.Events.GameLoop.ReturnedToTitle += OnReturnedToTitle;
             helper.ConsoleCommands.Add("replace_custom_furniture", "Triggers Custom Furniture Replacement", replaceCustomFurniture);
+        }
+
+        private void GameLoop_GameLaunched(object sender, GameLaunchedEventArgs e)
+        {
+            helper.Events.GameLoop.UpdateTicked += GameLoop_UpdateTicked;
+        }
+
+        private void GameLoop_UpdateTicked(object sender, UpdateTickedEventArgs e)
+        {
+            loadPacks();
+            helper.Events.GameLoop.UpdateTicked -= GameLoop_UpdateTicked;
         }
 
         public void harmonyFix()
@@ -75,10 +87,10 @@ namespace CustomFurniture
 
             if (param[0] == "shop" && Game1.activeClickableMenu is ShopMenu shop)
             {
-                Dictionary<Item, int[]> items = Helper.Reflection.GetField<Dictionary<Item, int[]>>(shop, "itemPriceAndStock").GetValue();
-                List<Item> selling = Helper.Reflection.GetField<List<Item>>(shop, "forSale").GetValue();
-                List<Item> remove = new List<Item>();
-                List<Item> additions = new List<Item>();
+                Dictionary<ISalable, int[]> items = Helper.Reflection.GetField<Dictionary<ISalable, int[]>>(shop, "itemPriceAndStock").GetValue();
+                List<ISalable> selling = Helper.Reflection.GetField<List<ISalable>>(shop, "forSale").GetValue();
+                List<ISalable> remove = new List<ISalable>();
+                List<ISalable> additions = new List<ISalable>();
 
                 foreach (Item i in selling)
                     if (i is Chest chest && furniturePile.Keys.Any(f => f.Equals(i.Name)))
@@ -102,7 +114,7 @@ namespace CustomFurniture
 
         public static void log(string text)
         {
-            instance.Monitor.Log(text);
+            instance.Monitor.Log(text,LogLevel.Trace);
         }
 
         private void OnReturnedToTitle(object sender, ReturnedToTitleEventArgs e)
@@ -130,7 +142,7 @@ namespace CustomFurniture
 
                 foreach (string file in cfiles)
                 {
-                    if (file.ToLower().Contains("manifest.json"))
+                    if (file.ToLower().Contains("manifest.json") || file.ToLower().EndsWith("pytk.json"))
                         continue;
 
                     CustomFurniturePack pack = cpack.ReadJsonFile<CustomFurniturePack>(Path.GetFileName(file));
@@ -148,16 +160,16 @@ namespace CustomFurniture
                         CustomFurnitureMod.log("Load:" + objectID);
                         string tkey = $"{data.folderName}/{ data.texture}";
                         if (!CustomFurniture.Textures.ContainsKey(tkey))
-                            CustomFurniture.Textures.Add(tkey, cpack.LoadAsset<Texture2D>(data.texture));
+                            CustomFurniture.Textures.Add(tkey, data.fromContent ? data.texture : cpack.GetActualAssetKey(data.texture));
                         CustomFurniture f = new CustomFurniture(data, objectID, Vector2.Zero);
-                        furniturePile.Add(pileID, f);
-                        furniture.Add(objectID, f);
+                        furniturePile.AddOrReplace(pileID, f);
+                        furniture.AddOrReplace(objectID, f);
                     }
                 }
 
             }
 
-            Monitor.Log(countPacks + " Content Packs with " + countObjects + " Objects found.");
+            Monitor.Log(countPacks + " Content Packs with " + countObjects + " Objects found.",LogLevel.Trace);
         }
 
         private string[] parseDir(string path, string extension)
@@ -175,8 +187,8 @@ namespace CustomFurniture
             if (Game1.activeClickableMenu is ShopMenu)
             {
                 ShopMenu shop = (ShopMenu)Game1.activeClickableMenu;
-                Dictionary<Item, int[]> items = Helper.Reflection.GetField<Dictionary<Item, int[]>>(shop, "itemPriceAndStock").GetValue();
-                List<Item> selling = Helper.Reflection.GetField<List<Item>>(shop, "forSale").GetValue();
+                Dictionary<ISalable, int[]> items = Helper.Reflection.GetField<Dictionary<ISalable, int[]>>(shop, "itemPriceAndStock").GetValue();
+                List<ISalable> selling = Helper.Reflection.GetField<List<ISalable>>(shop, "forSale").GetValue();
                 int currency = Helper.Reflection.GetField<int>(shop, "currency").GetValue();
                 bool isCatalogue = (currency == 0 && selling.Count > 0 && selling[0] is Furniture);
                 string shopkeeper = "Robin";
@@ -184,7 +196,7 @@ namespace CustomFurniture
 
                 if (shop.portraitPerson != null || isCatalogue)
                 {
-                    Dictionary<Item, int> newItemsToSell = new Dictionary<Item, int>();
+                    Dictionary<ISalable, int> newItemsToSell = new Dictionary<ISalable, int>();
 
                     foreach (CustomFurniture f in furniture.Values)
                     {
@@ -207,7 +219,7 @@ namespace CustomFurniture
                                 newItemsToSell.Add(f, isCatalogue ? 0 : f.Price);
                     }
 
-                    foreach (Item item in newItemsToSell.Keys)
+                    foreach (ISalable item in newItemsToSell.Keys)
                         if (!items.ContainsKey(item))
                         {
                             items.Add(item, new int[] { newItemsToSell[item], int.MaxValue });

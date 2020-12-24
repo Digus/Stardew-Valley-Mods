@@ -4,10 +4,15 @@ using PyTK.Types;
 using System;
 using System.IO;
 using PyTK.Extensions;
+using StardewModdingAPI;
+using System.Collections.Generic;
+using xTile;
+using xTile.Display;
+using Microsoft.Xna.Framework.Content;
 
 namespace PyTK.APIs
 {
-    public class PyTKAPI : IScalerAPI
+    public class PyTKAPI : IScalerAPI, ISerializerAPI, IMapAPI
     {
         public Texture2D CreateScaledTexture2D(Texture2D orgTexture, Texture2D scaledTexture, float scale = -1, Rectangle? forcedSourceRectangle = null)
         {
@@ -98,6 +103,44 @@ namespace PyTK.APIs
                 return sTexture;
 
             return CreateScaledTexture2D(texture, sTexture, scale, forcedSourceRectangle);
+        }
+
+        public void AddPreSerialization(IManifest manifest, Func<object, object> preserializer)
+        {
+            PyTKMod.PostSerializer.AddOrReplace(manifest, preserializer);
+        }
+
+        public void AddPostDeserialization(IManifest manifest, Func<object, object> postserializer)
+        {
+            PyTKMod.PostSerializer.AddOrReplace(manifest, postserializer);
+        }
+
+        public void ReplaceAssetAt(string assetName, Rectangle sourceRectangle, Texture2D texture)
+        {
+            if (Overrides.OvSpritebatchNew.repTextures.ContainsKey(assetName))
+                Overrides.OvSpritebatchNew.repTextures[assetName].AddOrReplace(sourceRectangle, texture);
+            else
+                Overrides.OvSpritebatchNew.repTextures.Add(assetName, new Dictionary<Rectangle?, Texture2D>() { { sourceRectangle, texture } });
+        }
+
+        public void EnableMoreMapLayers(Map map)
+        {
+            map?.enableMoreMapLayers();
+        }
+
+        public IDisplayDevice GetPyDisplayDevice(ContentManager contentManager, GraphicsDevice graphicsDevice)
+        {
+            return PyDisplayDevice.Instance ?? new PyDisplayDevice(contentManager, graphicsDevice);
+        }
+
+        public IDisplayDevice GetPyDisplayDevice(ContentManager contentManager, GraphicsDevice graphicsDevice, bool compatability)
+        {
+            return PyDisplayDevice.Instance ?? new PyDisplayDevice(contentManager, graphicsDevice,compatability);
+        }
+
+        public Dictionary<string, string> ParseDataString(object o)
+        {
+            return CustomElementHandler.SaveHandler.parseDataString(o);
         }
     }
 }

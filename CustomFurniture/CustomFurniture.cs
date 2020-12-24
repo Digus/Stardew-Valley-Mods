@@ -15,7 +15,7 @@ namespace CustomFurniture
     public class CustomFurniture : Furniture, ISaveElement
     {
         public Texture2D texture;
-        public static Dictionary<string, Texture2D> Textures = new Dictionary<string, Texture2D>();
+        public static Dictionary<string, string> Textures = new Dictionary<string, string>();
         private int animationFrames;
         private int frame;
         private Rectangle animatedSourceRect;
@@ -51,9 +51,9 @@ namespace CustomFurniture
             rotatedBoxWidth *= Game1.tileSize;
             rotatedBoxHeight = data.rotatedBoxHeight == -1 ? data.boxWidth : data.rotatedBoxHeight;
             rotatedBoxHeight *= Game1.tileSize;
-            setTexture();
-            animationFrames = data.animationFrames;
             this.data = data;
+
+            animationFrames = data.animationFrames;
             frameWidth = data.setWidth;
             frame = 0;
             skipFrame = 60 / data.fps;
@@ -63,7 +63,7 @@ namespace CustomFurniture
             CustomFurnitureMod.helper.Reflection.GetField<string>(this, "_description").SetValue(data.description);
 
             parentSheetIndex.Set(data.index);
-
+            setTexture();
             name = data.name;
             List<string> decorTypes = new List<string>();
             decorTypes.Add("chair");
@@ -95,14 +95,24 @@ namespace CustomFurniture
             price.Value = data.price;
 
             fRotation = FurnitureRotation.horizontal;
+            texture = null;
+        }
+
+        public override void DayUpdate(GameLocation location)
+        {
+            if (data.fromContent)
+                texture = CustomFurnitureMod.helper.Content.Load<Texture2D>(data.texture, StardewModdingAPI.ContentSource.GameContent);
+
+            base.DayUpdate(location);
         }
 
         private void setTexture()
         {
+            restore();
             string folder = new DirectoryInfo(data.folderName).Name;
             string tkey = $"{folder}/{data.texture}";
             if (Textures.ContainsKey(tkey))
-                texture = Textures[($"{folder}/{data.texture}")];
+                texture = CustomFurnitureMod.helper.Content.Load<Texture2D>(Textures[($"{folder}/{data.texture}")],StardewModdingAPI.ContentSource.GameContent);
         }
 
         protected override string loadDisplayName()
@@ -204,7 +214,7 @@ namespace CustomFurniture
             return defaultBoundingBox;
         }
 
-        public override void drawInMenu(SpriteBatch spriteBatch, Vector2 location, float scaleSize, float transparency, float layerDepth, bool drawStackNumber, Color color, bool drawShadow)
+        public override void drawInMenu(SpriteBatch spriteBatch, Vector2 location, float scaleSize, float transparency, float layerDepth, StackDrawType drawStackNumber, Color color, bool drawShadow)
         {
             if (texture == null)
                 setTexture();
@@ -248,6 +258,7 @@ namespace CustomFurniture
 
         private void customDrawAtNonTileSpot(CustomFurniture ho, SpriteBatch spriteBatch, Vector2 location, float layerDepth, float alpha = 1f)
         {
+            restore();
             spriteBatch.Draw(ho.texture, location, new Rectangle?(ho.sourceRect.Value), Color.White * alpha, 0.0f, Vector2.Zero, (float)Game1.pixelZoom, this.Flipped ? SpriteEffects.FlipHorizontally : SpriteEffects.None, layerDepth);
         }
 
@@ -271,6 +282,17 @@ namespace CustomFurniture
             savedata.Add("rotation", ((int) fRotation).ToString());
             savedata.Add("rotations", rotations.ToString());
             return savedata;
+        }
+
+        public void restore()
+        {
+            if (this.data == null)
+           foreach(var f in CustomFurnitureMod.furniturePile)
+                if (f.Value.data.name == name)
+                {
+                    build(f.Value.data, f.Key, tileLocation);
+                    break;
+                }
         }
 
         public void rebuild(Dictionary<string, string> additionalSaveData, object replacement)

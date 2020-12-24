@@ -12,41 +12,90 @@ using Harmony;
 using System.Reflection;
 using StardewValley.Menus;
 using System.Collections.Generic;
-using xTile.Format;
 using System.Linq;
-using PyTK.Tiled;
 using PyTK.Lua;
 using xTile;
-using xTile.Dimensions;
 using PyTK.Overrides;
 using PyTK.APIs;
-using Microsoft.Xna.Framework.Input;
+using System.Threading.Tasks;
+using System.Collections;
+using System.Xml.Serialization;
+using Microsoft.Xna.Framework.Graphics;
+using System.IO;
+using TMXTile;
+using xTile.Layers;
+using xTile.Tiles;
+using StardewValley.Objects;
 
 namespace PyTK
 {
+    public class PyTKConfig
+    {
+        public string[] Options { get; set; } = new string[0];
+    }
 
     public class PyTKMod : Mod
     {
-        internal static IModHelper _helper;
         internal static IModEvents _events => _helper.Events;
-        internal static IMonitor _monitor;
         internal static bool _activeSpriteBatchFix = true;
         internal static string sdvContentFolder => PyUtils.ContentPath;
         internal static List<IPyResponder> responders;
         internal static PyTKSaveData saveData = new PyTKSaveData();
+        internal static Dictionary<string, string> tokenStrings = new Dictionary<string, string>();
+        internal static Dictionary<string, bool> tokenBoleans = new Dictionary<string, bool>();
+        internal static bool UpdateCustomObjects = false;
+        internal static bool ReInjectCustomObjects = false;
+        internal static bool UpdateLuaTokens = false;
+        public static Dictionary<IManifest, Func<object, object>> PreSerializer = new Dictionary<IManifest, Func<object, object>>();
+        public static Dictionary<IManifest, Func<object, object>> PostSerializer = new Dictionary<IManifest, Func<object, object>>();
+        public static List<IInterceptor> ContentInterceptors = new List<IInterceptor>();
+
+        internal static List<GameLocation> RecheckedLocations = new List<GameLocation>();
+
+        internal static List<Type> SerializerTypes = new List<Type>();
+
+        internal static object waitForIt = new object();
+        internal static object waitForPatching = new object();
+        internal static object waitForItems = new object();
+
+        internal static HarmonyInstance hInstance;
+
+        internal static UpdateTickedEventArgs updateTicked;
+
+        internal static PyTKMod _instance { get; set; }
+
+        internal static IMonitor _monitor {
+            get {
+                return _instance.Monitor;
+            }
+        }
+        public static IModHelper _helper
+        {
+            get
+            {
+                return _instance.Helper;
+            }
+        }
+
+        internal static PyTKConfig Config { get; set; } = new PyTKConfig();
 
         public override void Entry(IModHelper helper)
         {
-            _helper = helper;
-            _monitor = Monitor;
-    
-                harmonyFix();
-        
-               // Monitor.Log("Harmony Patching failed", LogLevel.Error);
+            _instance = this;
 
-            FormatManager.Instance.RegisterMapFormat(new NewTiledTmxFormat());
+            Config = helper.ReadConfig<PyTKConfig>();
 
-            SaveHandler.BeforeRebuilding += (a, b) => CustomObjectData.collection.useAll(k => k.Value.sdvId = k.Value.getNewSDVId());
+            hInstance = HarmonyInstance.Create("Platonymous.PyTK.Rev");
+            helper.Events.Display.RenderingWorld += (s,e) =>
+            {
+                if (Game1.currentLocation is GameLocation location && location.Map is Map map && map.GetBackgroundColor() is TMXColor tmxColor)
+                    Game1.graphics.GraphicsDevice.Clear(tmxColor.toColor());
+            };
+
+            PostSerializer.Add(ModManifest, Rebuilder);
+            PreSerializer.Add(ModManifest, Replacer);
+
+            harmonyFix();
             initializeResponders();
             startResponder();
             registerConsoleCommands();
@@ -57,6 +106,67 @@ namespace PyTK
             SaveHandler.setUpEventHandlers();
             CustomObjectData.CODSyncer.start();
             ContentSync.ContentSyncHandler.initialize();
+            bool adjustForCompat2 = false;
+            bool hasMapTK = false;
+            helper.Events.GameLoop.GameLaunched += (s, e) =>
+            {
+
+                if (xTile.Format.FormatManager.Instance.GetMapFormatByExtension("tmx") is TMXFormat tmxf)
+                    tmxf.DrawImageLayer = PyMaps.drawImageLayer;
+
+                hasMapTK = helper.ModRegistry.IsLoaded("Platonymous.MapTK");
+                adjustForCompat2 = helper.ModRegistry.IsLoaded("DigitalCarbide.SpriteMaster");
+                Game1.mapDisplayDevice = hasMapTK ? Game1.mapDisplayDevice : new PyDisplayDevice(Game1.content, Game1.graphics.GraphicsDevice, adjustForCompat2);
+            };
+
+            helper.Events.GameLoop.SaveLoaded += (s, e) =>
+            {
+                if(!(Game1.mapDisplayDevice is PyDisplayDevice))
+                    Game1.mapDisplayDevice = hasMapTK ? Game1.mapDisplayDevice : PyDisplayDevice.Instance ?? new PyDisplayDevice(Game1.content, Game1.graphics.GraphicsDevice, adjustForCompat2);
+            };
+
+            helper.Events.GameLoop.SaveCreated += (s, e) =>
+            {
+                if (!(Game1.mapDisplayDevice is PyDisplayDevice))
+                    Game1.mapDisplayDevice = hasMapTK ? Game1.mapDisplayDevice : PyDisplayDevice.Instance ?? new PyDisplayDevice(Game1.content, Game1.graphics.GraphicsDevice, adjustForCompat2);
+            };
+
+            helper.ConsoleCommands.Add("show_mapdata", "", (s, p) =>
+             {
+                 ShowMapData(Game1.currentLocation.Map);
+             }
+
+            );
+
+            helper.Events.GameLoop.DayStarted += (s, e) =>
+            {
+                if (ReInjectCustomObjects)
+                {
+                    ReInjectCustomObjects = false;
+                    CustomObjectData.injector?.Invalidate();
+                    CustomObjectData.injectorBig?.Invalidate();
+                }
+            };
+
+            helper.Events.GameLoop.UpdateTicked += (s, e) =>
+            {
+                updateTicked = e;
+            };
+
+            helper.Events.GameLoop.ReturnedToTitle += (s, e) =>
+            {
+                foreach(Layer l in PyMaps.LayerHandlerList.Keys)
+                {
+                    foreach (var h in PyMaps.LayerHandlerList[l])
+                    {
+                        l.AfterDraw -= h;
+                        l.BeforeDraw -= h;
+                    }
+                }
+
+                PyMaps.LayerHandlerList.Clear();
+            };
+              
             this.Helper.Events.Player.Warped += Player_Warped;
             this.Helper.Events.GameLoop.DayStarted += OnDayStarted;
             this.Helper.Events.Multiplayer.PeerContextReceived += (s, e) =>
@@ -79,21 +189,24 @@ namespace PyTK
 
             Helper.Events.Display.RenderingHud += (s, e) =>
             {
-                if(Game1.displayHUD)
-                    PyTK.PlatoUI.UIHelper.DrawHud(e.SpriteBatch, true);
+                if (Game1.displayHUD && Context.IsWorldReady)
+                PyTK.PlatoUI.UIHelper.DrawHud(e.SpriteBatch, true);
+
             };
 
             Helper.Events.Display.RenderedHud += (s, e) =>
             {
-                if (Game1.displayHUD)
+                if (Game1.displayHUD && Context.IsWorldReady)
                     PyTK.PlatoUI.UIHelper.DrawHud(e.SpriteBatch, false);
             };
 
             Helper.Events.Input.ButtonPressed += (s, e) =>
             {
-                if (Game1.displayHUD)
+                if (Game1.displayHUD && Context.IsWorldReady)
+                {
                     if (e.Button == SButton.MouseLeft || e.Button == SButton.MouseRight)
                         PlatoUI.UIHelper.BaseHud.PerformClick(e.Cursor.ScreenPixels.toPoint(), e.Button == SButton.MouseRight, false, false);
+                }
             };
 
             Helper.Events.Display.WindowResized += (s, e) =>
@@ -105,7 +218,7 @@ namespace PyTK
             Helper.Events.Multiplayer.ModMessageReceived += PyNet.Multiplayer_ModMessageReceived;
             helper.Events.GameLoop.Saving += (s, e) =>
             {
-                if(Game1.IsMasterGame)
+                if (Game1.IsMasterGame)
                     try
                 {
                     helper.Data.WriteSaveData<PyTKSaveData>("PyTK.ModSaveData",saveData);
@@ -122,6 +235,8 @@ namespace PyTK
 
             helper.Events.GameLoop.SaveLoaded += (s, e) =>
             {
+                CustomTVMod.reloadStrings();
+
                 if (Game1.IsMasterGame)
                 {
                     try
@@ -141,6 +256,43 @@ namespace PyTK
                 if (Context.IsWorldReady && Game1.currentLocation is GameLocation location && location.Map is Map map)
                     PyUtils.checkDrawConditions(map);
             };
+
+            helper.Events.GameLoop.DayStarted += (s, e) =>
+            {
+                if(Game1.currentLocation is GameLocation loc)
+                UpdateLuaTokens = true;
+            };
+
+            helper.Events.GameLoop.UpdateTicked += (s, e) => AnimatedTexture2D.ticked = e.Ticks;
+        }
+
+        private void ShowMapData(Map map)
+        {
+            Monitor.Log("Map Data for " + Game1.currentLocation.Name, LogLevel.Info);
+            Monitor.Log("--------------------" + Game1.currentLocation.Name, LogLevel.Info);
+
+            Monitor.Log("Layers: " + map.Layers.Count, LogLevel.Info);
+            foreach (Layer l in map.Layers)
+            {
+                Monitor.Log("------- " + l.Id + " -------", LogLevel.Info);
+                List<string> tileData = new List<string>();
+
+                for (int x = 0; x < l.DisplayWidth / Game1.tileSize; x++)
+                    for (int y = 0; y < l.DisplayHeight / Game1.tileSize; y++)
+                    {
+                        if (l.Tiles[x, y] is Tile tile)
+                            Monitor.Log("[" + x + "," + y + "] => " + tile.TileSheet.Id + ":" + tile.TileIndex, LogLevel.Info);
+                    }
+
+            }
+
+            Monitor.Log("--------------------" + Game1.currentLocation.Name, LogLevel.Info);
+
+            Monitor.Log("Tilesheets: " + map.TileSheets.Count, LogLevel.Info);
+            foreach (TileSheet ts in map.TileSheets)
+            {
+                Monitor.Log("[" + ts.Id + "] => " + ts.ImageSource + " (" + (Game1.mapDisplayDevice as PyDisplayDevice).GetTexture(ts)?.Width + "x"+ (Game1.mapDisplayDevice as PyDisplayDevice).GetTexture(ts)?.Height+ ")", LogLevel.Info);
+            }
         }
 
         public static void syncCounter(string id, int value)
@@ -148,7 +300,7 @@ namespace PyTK
             if (Game1.IsMultiplayer)
                 PyNet.sendRequestToAllFarmers<bool>("PyTK.ModSavdDataCounterChangeReceiver", new ValueChangeRequest<string,int>(id,value,saveData.Counters[id]), null, SerializationType.JSON,-1);
         }
-
+        
         public override object GetApi()
         {
             return new PyTKAPI();
@@ -156,14 +308,57 @@ namespace PyTK
 
         private void Player_Warped(object sender, WarpedEventArgs e)
         {
+            if (e.NewLocation.Map.Properties.ContainsKey("@WaterColor") && TMXColor.FromString(e.NewLocation.Map.Properties["@WaterColor"]) is TMXColor color)
+                e.NewLocation.waterColor.Value = new Color(color.R, color.G, color.B, color.A);
+            
+            if (!e.IsLocalPlayer)
+                return;
+
             e.NewLocation?.Map.enableMoreMapLayers();
+
+            if (e.NewLocation is GameLocation loc && loc.waterTiles == null && loc.Map.Properties.TryGetValue("@LoadWater", out xTile.ObjectModel.PropertyValue value) && (value == true || value.ToString() == "T"))
+            {
+                loc.waterTiles = new bool[loc.map.Layers[0].LayerWidth, loc.map.Layers[0].LayerHeight];
+                bool flag = false;
+                for (int xTile = 0; xTile < loc.map.Layers[0].LayerWidth; ++xTile)
+                {
+                    for (int yTile = 0; yTile < loc.map.Layers[0].LayerHeight; ++yTile)
+                    {
+                        if (loc.doesTileHaveProperty(xTile, yTile, "Water", "Back") != null)
+                        {
+                            flag = true;
+                            loc.waterTiles[xTile, yTile] = true;
+                        }
+                    }
+                }
+                if (!flag)
+                    loc.waterTiles = (bool[,])null;
+            }
 
             if (e.NewLocation is GameLocation g && g.map is Map m)
             {
-                if (m.Properties.ContainsKey("EntryAction"))
-                    TileAction.invokeCustomTileActions("EntryAction", g, Vector2.Zero, "Map");
+                int forceX = Game1.player.getTileX();
+                int forceY = Game1.player.getTileY();
+                int forceF = Game1.player.FacingDirection;
+                if (e.OldLocation is GameLocation og && m.Properties.ContainsKey("ForceEntry_" + og.Name)){
+                    string[] pos = m.Properties["ForceEntry_" + og.Name].ToString().Split(' ');
+                    if(pos.Length > 0 && pos[1] != "X")
+                        int.TryParse(pos[0], out forceX);
 
-                PyUtils.checkDrawConditions(m);
+                    if (pos.Length > 1 && pos[1] != "Y")
+                        int.TryParse(pos[1], out forceY);
+
+                    if (pos.Length > 2 && pos[2] != "F")
+                        int.TryParse(pos[2], out forceF);
+
+                    Game1.player.Position = new Vector2(forceX, forceY);
+                    Game1.player.FacingDirection = forceF;
+                }
+                
+                    if (m.Properties.ContainsKey("EntryAction"))
+                        TileAction.invokeCustomTileActions("EntryAction", g, Vector2.Zero, "Map");
+
+                    PyUtils.checkDrawConditions(m);
             }
         }
 
@@ -172,14 +367,498 @@ namespace PyTK
             if (Game1.currentLocation is GameLocation g && g.map is Map m && m.Properties.ContainsKey("EntryAction"))
                 TileAction.invokeCustomTileActions("EntryAction", g, Vector2.Zero, "Map");
         }
+        
+        public static HarmonyInstance instance = HarmonyInstance.Create("Platonymous.PyTK");
 
         private void harmonyFix()
         {
-            HarmonyInstance instance = HarmonyInstance.Create("Platonymous.PyTK");
             OvSpritebatchNew.initializePatch(instance);
-           // PyUtils.initOverride("SObject", PyUtils.getTypeSDV("Object"),typeof(DrawFix1), new List<string>() { "draw", "drawInMenu", "drawWhenHeld", "drawAsProp" });
-           // PyUtils.initOverride("TemporaryAnimatedSprite", PyUtils.getTypeSDV("TemporaryAnimatedSprite"),typeof(DrawFix2), new List<string>() { "draw" });
+            Monitor.Log("Patching: Assembly", LogLevel.Trace);
+
             instance.PatchAll(Assembly.GetExecutingAssembly());
+            
+            Monitor.Log("Patching: Load", LogLevel.Trace);
+            instance.Patch(typeof(SaveGame).GetMethod("Load", BindingFlags.Static | BindingFlags.Public), prefix: new HarmonyMethod(typeof(PyTKMod).GetMethod("saveLoadedXMLFix", BindingFlags.Static | BindingFlags.Public)));
+
+            Monitor.Log("Patching: Serializers", LogLevel.Trace);
+            PatchGeneratedSerializers(new Assembly[] { Assembly.GetExecutingAssembly() });
+
+            Monitor.Log("Patching: GameLocation Constructors", LogLevel.Trace);
+            foreach (ConstructorInfo mc in typeof(GameLocation).GetConstructors())
+                instance.Patch(mc, postfix: new HarmonyMethod(typeof(OvLocations).GetMethod("GameLocationConstructor", BindingFlags.Static | BindingFlags.Public)));
+
+            Helper.Events.GameLoop.DayStarted += GameLoop_DayStarted;
+
+            if (Constants.TargetPlatform != GamePlatform.Android)
+            {
+                Monitor.Log("Patching: Serializers Assembly", LogLevel.Trace);
+                try
+                {
+                    SetUpAssemblyPatch(hInstance, new XmlSerializer[] { SaveGame.farmerSerializer, SaveGame.locationSerializer, SaveGame.serializer });
+                }
+                catch
+                {
+                    Monitor.Log("Failed to Patch: Serializers Assembly. If the game crashes on save, this might be the cause.", LogLevel.Info);
+                }
+            }
+
+            Helper.Events.GameLoop.GameLaunched += (s, e) =>
+            {
+                if (Config.Options.Contains("DisableSerializerPatch"))
+                    return;
+
+                Task.Run(() =>
+               {
+                   lock (waitForIt)
+                       PatchGeneratedSerializers(AppDomain.CurrentDomain.GetAssemblies().Where(a => a.FullName.Contains("Microsoft.GeneratedCode")));
+               });
+            };
+
+            Monitor.Log("Patching: GetModFile", LogLevel.Trace);
+
+            try
+            {
+                instance.Patch(
+                   original: AccessTools.Method(Type.GetType("StardewModdingAPI.Framework.ContentManagers.ModContentManager, StardewModdingAPI"), "GetModFile"),
+                   prefix: new HarmonyMethod(this.GetType().GetMethod("GetModFile", BindingFlags.Public | BindingFlags.Static))
+               );
+            }
+            catch
+            {
+                Monitor.Log("Failed to Patch: GetModFile, this Error may not be critical", LogLevel.Info);
+            }
+
+            Monitor.Log("Patching: NormalizeTilesheetPaths", LogLevel.Trace);
+            try
+            {
+                instance.Patch(
+                   original: AccessTools.Method(Type.GetType("StardewModdingAPI.Framework.ContentManagers.ModContentManager, StardewModdingAPI"), "NormalizeTilesheetPaths"),
+                   postfix: new HarmonyMethod(this.GetType().GetMethod("NormalizeTilesheetPaths", BindingFlags.Public | BindingFlags.Static))
+               );
+            }
+            catch
+            {
+                Monitor.Log("Failed to Patch: NormalizeTilesheetPaths, this Error may not be critical", LogLevel.Info);
+            }
+
+            setupLoadIntercepter(instance);
+        }
+
+        private static List<string> excludeTileSheetsFromModFolder = new List<string>();
+
+        public static void GetModFile(ref string path)
+        {
+            if (excludeTileSheetsFromModFolder.Contains(Path.GetFileNameWithoutExtension(path)))
+                path = "Excluded_" + path;
+        }
+
+        public static void NormalizeTilesheetPaths(Map map)
+        {
+
+            excludeTileSheetsFromModFolder.Clear();
+
+            if (!map.TileSheets.Any())
+                return;
+
+
+            foreach (xTile.Tiles.TileSheet tilesheet in map.TileSheets)
+            {
+                if ((tilesheet.Properties.TryGetValue("@Vanilla", out xTile.ObjectModel.PropertyValue vanillaProperty) && vanillaProperty != null) ||
+                    (tilesheet.Properties.TryGetValue("@IgnoreLocalFile", out xTile.ObjectModel.PropertyValue ignoreProperty) && ignoreProperty != null))
+                {
+                    bool isOutdoors = map.Properties.TryGetValue("Outdoors", out xTile.ObjectModel.PropertyValue outdoorsProperty) && outdoorsProperty != null;
+
+                    string filename = Path.GetFileNameWithoutExtension(tilesheet.ImageSource);
+                    bool isSeasonal = filename.StartsWith("spring_", StringComparison.CurrentCultureIgnoreCase)
+                        || filename.StartsWith("summer_", StringComparison.CurrentCultureIgnoreCase)
+                        || filename.StartsWith("fall_", StringComparison.CurrentCultureIgnoreCase)
+                        || filename.StartsWith("winter_", StringComparison.CurrentCultureIgnoreCase);
+                    if (isOutdoors && isSeasonal)
+                        filename = $"{Game1.currentSeason}_{filename.Substring(filename.IndexOf("_", StringComparison.CurrentCultureIgnoreCase) + 1)}";
+                   
+                    excludeTileSheetsFromModFolder.AddOrReplace(filename);
+                }
+            }
+        }
+
+
+        private void setupLoadIntercepter(HarmonyInstance harmony)
+        {
+             Monitor.Log("Patching: FromStream", LogLevel.Trace);
+
+            if (!Config.Options.Contains("DisableFSPatch"))
+                foreach (MethodBase m in typeof(Texture2D).GetMethods(BindingFlags.Public | BindingFlags.Static).Where(gm => gm.Name.Contains("FromStream") && gm.GetParameters().ToList().Exists(p => p.Name == "stream")))
+                {
+                    try
+                    {
+                        harmony.Patch(
+                            original: m,
+                            postfix: new HarmonyMethod(this.GetType().GetMethod("FromStreamIntercepter", BindingFlags.Public | BindingFlags.Static)));
+                    }
+                    catch
+                    {
+                        Monitor.Log("Failed to Patch: FromStream, this Error may not be critical", LogLevel.Info);
+                    }
+                }
+
+            Monitor.Log("Patching: PatchImage", LogLevel.Trace);
+
+            try
+            {
+                harmony.Patch(
+                original: AccessTools.Method(Type.GetType("StardewModdingAPI.Framework.Content.AssetDataForImage, StardewModdingAPI"), "PatchImage"),
+                prefix: new HarmonyMethod(this.GetType().GetMethod("PatchImage", BindingFlags.Public | BindingFlags.Static))
+            );
+            }
+            catch
+            {
+                Monitor.Log("Failed to Patch: PatchImage, this Error may not be critical", LogLevel.Info);
+            }
+
+            Monitor.Log("Patching: ExtendImage", LogLevel.Trace);
+
+            try
+            {
+                harmony.Patch(
+                   original: AccessTools.Method(Type.GetType("StardewModdingAPI.Framework.Content.AssetDataForImage, StardewModdingAPI"), "ExtendImage"),
+                   prefix: new HarmonyMethod(this.GetType().GetMethod("ExtendImage", BindingFlags.Public | BindingFlags.Static))
+               );
+            }
+            catch
+            {
+                Monitor.Log("Failed to Patch: ExtendImage, this Error may not be critical", LogLevel.Info);
+            }
+
+            Monitor.Log("Patching: FileStream Constructors", LogLevel.Trace);
+
+            
+                foreach (ConstructorInfo constructor in typeof(FileStream).GetConstructors().Where(c => c.GetParameters().ToList().Exists(p => p.ParameterType == typeof(string) && p.Name == "path")))
+                {
+                    try
+                    {
+                        harmony.Patch(
+                       original: constructor,
+                       prefix: new HarmonyMethod(this.GetType().GetMethod("FileStreamConstructorPre", BindingFlags.Public | BindingFlags.Static))
+                        );
+                    }
+                    catch
+                    {
+                        Monitor.Log("Failed to Patch: FileStream Constructors, this Error may not be critical", LogLevel.Info);
+
+                    }
+                }
+
+            Monitor.Log("Patching: PremultiplyTransparency", LogLevel.Trace);
+
+            try
+            {
+                harmony.Patch(
+                    original: AccessTools.Method(Type.GetType("StardewModdingAPI.Framework.ContentManagers.ModContentManager, StardewModdingAPI"), "PremultiplyTransparency"),
+                    prefix: new HarmonyMethod(this.GetType().GetMethod("PremultiplyTransparencyPre", BindingFlags.Public | BindingFlags.Static))
+                );
+            }
+            catch
+            {
+                Monitor.Log("Failed to Patch: PremultiplyTransparency, this Error may not be critical", LogLevel.Info);
+            }
+
+            ContentInterceptors.Add(new TextureInterceptor<ScaleUpData>(ModManifest, ScaleUpInterceptor));
+        }
+
+        private static string openPath = "";
+
+        public static void PremultiplyTransparencyPre(object __instance, ref Texture2D texture)
+        {
+            if (openPath != "")
+                FromPathIntercepter(openPath, ref texture);
+        }
+
+        public static void FileStreamConstructorPre(ref string path)
+        {
+            if (path.Contains(@"Maps/Maps") && !path.Contains("assets"))
+                path = path.Replace(@"Maps/Maps", "Maps");
+
+            openPath = path;
+            
+        }
+
+        public static Texture2D ScaleUpInterceptor(Texture2D texture, ScaleUpData data, string path)
+        {
+            if (data is ScaleUpData && !(texture is ScaledTexture2D))
+                {
+                bool scaled = false, animated = false, loop = true;
+                    float scale = 1f;
+                    int tileWidth = 0, tileHeight = 0, fps = 0;
+
+                    if (data.SourceArea is int[] area && area.Length == 4)
+                        texture = texture.getArea(new Rectangle(area[0], area[1], area[2], area[3]));
+
+                    if (data.Scale != 1f)
+                    {
+                        scale = data.Scale;
+                        scaled = true;
+                    }
+
+                    if (data.Animation is Animation anim)
+                    {
+                        tileHeight = anim.FrameHeight == -1 ? texture.Height : anim.FrameHeight;
+                        tileWidth = anim.FrameWidth == -1 ? texture.Width : anim.FrameWidth;
+                        fps = anim.FPS;
+                        loop = anim.Loop;
+
+                        if (!(tileWidth == texture.Width && tileHeight == texture.Height))
+                            animated = true;
+                    }
+
+                    if (animated)
+                        return new AnimatedTexture2D(Premultiply(texture), tileWidth, tileHeight, fps, loop, !scaled ? 1f : scale);
+                    else if (scaled)
+                        return ScaledTexture2D.FromTexture(texture.ScaleUpTexture(1f / scale, false), Premultiply(texture), scale);
+                }
+                return texture;
+        }
+
+        public static Texture2D Premultiply(Texture2D texture)
+        {
+            Color[] data = new Color[texture.Width * texture.Height];
+            texture.GetData(data);
+            for (int i = 0; i < data.Length; i++)
+            {
+                if (data[i].A == 0)
+                    continue;
+
+                data[i] = Color.FromNonPremultiplied(data[i].ToVector4());
+            }
+
+            texture.SetData(data);
+            return texture;
+        }
+
+
+        public static bool ExtendImage(IAssetDataForImage __instance, int minWidth, int minHeight)
+        {
+            return !(__instance.Data is ScaledTexture2D || __instance.Data is MappedTexture2D);
+        }
+        public static bool PatchImage(IAssetDataForImage __instance, ref Texture2D source, ref Rectangle? sourceArea, Rectangle? targetArea, PatchMode patchMode)
+        {
+            var a = new Rectangle(0, 0, __instance.Data.Width, __instance.Data.Height);
+            var s = new Rectangle(0, 0, source.Width, source.Height);
+            var sr = !sourceArea.HasValue ? s : sourceArea.Value;
+            var tr = !targetArea.HasValue ? sr : targetArea.Value;
+
+            if (source is ScaledTexture2D scaled)
+            {
+                if (a == tr && patchMode == PatchMode.Replace)
+                {
+                    __instance.ReplaceWith(source);
+                    return true;
+                }
+
+                if (patchMode == PatchMode.Overlay)
+                    scaled.AsOverlay = true;
+
+                if (scaled.AsOverlay)
+                {
+                    Color[] data = new Color[(int)(tr.Width) * (int)(tr.Height)];
+                    __instance.Data.getArea(tr).GetData(data);
+                    scaled.SetData<Color>(data);
+                }
+
+                if (__instance.Data is MappedTexture2D map)
+                    map.Set(tr, source);
+                else
+                    __instance.ReplaceWith(new MappedTexture2D(__instance.Data, new Dictionary<Rectangle?, Texture2D>() { { tr, source } }));
+            }
+            else if (__instance.Data is MappedTexture2D map)
+            {
+                map.Set(tr, (sr.Width != source.Width || sr.Height != source.Height) ? source.getArea(sr) : source);
+                return false;
+            }else if(__instance.Data is ScaledTexture2D sc)
+            {
+                __instance.ReplaceWith(new MappedTexture2D(__instance.Data, new Dictionary<Rectangle?, Texture2D>() { { tr, (sr.Width != source.Width || sr.Height != source.Height) ? source.getArea(sr) : source } }));
+                return false;
+            }
+
+            return true;
+        }
+
+        public static void FromStreamIntercepter(Stream stream, ref Texture2D __result)
+        {
+            if (stream is FileStream fs)
+                FromPathIntercepter(fs.Name, ref __result);
+        }
+
+        public static void FromPathIntercepter(string path, ref Texture2D __result)
+        {
+            openPath = "";
+            if (Path.GetFileNameWithoutExtension(path) is string key
+                && Path.GetDirectoryName(path) is string dir
+                && Path.Combine(dir, key + ".pytk.json") is string pytkDataFile
+                && File.Exists(pytkDataFile)
+                && Newtonsoft.Json.JsonConvert.DeserializeObject<InterceptorData>(File.ReadAllText(pytkDataFile)) is InterceptorData idata)
+                foreach (IInterceptor<Texture2D> interceptor in ContentInterceptors
+                .Where(i => i is IInterceptor<Texture2D>
+                && i.DataType != null && idata.Mods.Contains(i.Mod.UniqueID)))
+                    if (Newtonsoft.Json.JsonConvert.DeserializeObject(File.ReadAllText(pytkDataFile), interceptor.DataType) is object o && o.GetType() == interceptor.DataType)
+                        __result = interceptor.Handler(__result, o, path);
+        }
+
+        public static bool saveWasLoaded = false;
+
+        public static void saveLoadedXMLFix()
+        {
+            if (saveWasLoaded)
+                return;
+
+            lock (waitForIt)
+            {
+                saveWasLoaded = true;
+            }
+        }
+
+        public void SetUpAssemblyPatch(HarmonyInstance instance, IEnumerable<XmlSerializer> serializers)
+        {
+            if (Config.Options.Contains("DisableSerializerPatch"))
+                return;
+
+            foreach (var serializer in serializers)
+            {
+                var cache = serializer.GetType().GetField("cache", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
+                Hashtable cacheTable = (Hashtable)cache.GetType().GetField("cache", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(cache);
+
+                foreach (var c in cacheTable.Values)
+                {
+                    var a = (Assembly)c.GetType().GetField("assembly", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(c);
+                    PatchGeneratedSerializers(new Assembly[] { a });
+                }
+
+                instance.Patch(cache.GetType().GetMethod("Add", BindingFlags.NonPublic | BindingFlags.Instance), postfix: new HarmonyMethod(typeof(PyTKMod).GetMethod("AssemblyCachePatch", BindingFlags.Static | BindingFlags.Public)));
+            }
+        }
+
+        public static void AssemblyCachePatch(string ns, object o, object assembly)
+        {
+            PatchGeneratedSerializers(new Assembly[] { (Assembly)assembly.GetType().GetField("assembly", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(assembly) });
+        }
+
+        public static void serializeFix(ref System.Object o)
+        {
+            foreach (var serializer in PreSerializer.Keys)
+                try
+                {
+                    o = PreSerializer[serializer].Invoke(o);
+                }
+                catch (Exception e)
+                {
+                    _monitor.Log("Error during serialization: " + serializer.Name, LogLevel.Error);
+                    _monitor.Log(e.Message);
+                    _monitor.Log(e.StackTrace);
+                }
+        }
+
+        private void GameLoop_DayStarted(object sender, DayStartedEventArgs e)
+        {
+            Helper.Events.GameLoop.DayStarted -= GameLoop_DayStarted;
+        }
+
+        public static void PatchGeneratedSerializers(IEnumerable<Assembly> assemblies)
+        {
+            foreach (var ass in assemblies)
+                foreach (var ty in ass.GetTypes().Where(t => t.Name.StartsWith("XmlSerializer1") || t.Name.StartsWith("XmlSerializationWriter") || t.Name.StartsWith("XmlSerializationReader")))
+                    PatchGeneratedSerializerType(ty);
+        }
+
+        public static void PatchGeneratedSerializerType(Type ty)
+        {
+            if (ty.FullName.Contains("XmlSerializer1"))
+            {
+                if (Constants.TargetPlatform != GamePlatform.Android && ty.GetField("cache", BindingFlags.NonPublic | BindingFlags.Static) is FieldInfo field && field.GetValue(null) is object cache)
+                    if (cache.GetType().GetField("cache", BindingFlags.NonPublic | BindingFlags.Instance) is FieldInfo cField && cField.GetValue(cache) is Hashtable cacheTable)
+                    {
+                        foreach (var c in cacheTable.Values)
+                        {
+                            var a = (Assembly)c.GetType().GetField("assembly", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(c);
+                            PatchGeneratedSerializers(new Assembly[] { a });
+                        }
+
+                        instance.Patch(cache.GetType().GetMethod("Add", BindingFlags.NonPublic | BindingFlags.Instance), postfix: new HarmonyMethod(typeof(PyTKMod).GetMethod("AssemblyCachePatch", BindingFlags.Static | BindingFlags.Public)));
+                    }
+            }
+            else
+            {
+                foreach (var met in ty.GetMethods(BindingFlags.NonPublic | BindingFlags.Instance))
+                {
+                    string type = "--object";
+                    try
+                    {
+                        if (met.Name.Contains("_") && (met.Name.StartsWith("Write") || met.Name.StartsWith("Read")))
+                            if (met.Name.StartsWith("Write") && (new List<ParameterInfo>(met.GetParameters()).Exists(p => p.Name == "o" && p.ParameterType.IsClass && p.ParameterType.FullName.Contains("Stardew"))))
+                            {
+                                Type t = met.GetParameters().ToList().Where(p => p.Name == "o").Select(p => p.ParameterType).FirstOrDefault();
+                                type = t.ToString();
+                                hInstance.Patch(met, prefix: new HarmonyMethod(typeof(PyTKMod).GetMethod("saveXMLReplacer", BindingFlags.Static | BindingFlags.Public)));
+                            }
+                            else if (met.Name.StartsWith("Read") && met.ReturnType != null && met.ReturnType.IsClass && met.ReturnType.FullName.Contains("Stardew"))
+                            {
+                                Type t = met.ReturnType;
+                                type = t.ToString();
+                                hInstance.Patch(met, postfix: new HarmonyMethod(typeof(PyTKMod).GetMethod("saveXMLRebuilder", BindingFlags.Static | BindingFlags.Public)));
+                            }
+                    }
+                    catch(Exception e) {
+                        _monitor.Log(type, LogLevel.Error);
+                        _monitor.Log(e.Message + ":" + e.StackTrace, LogLevel.Info);
+                    }
+                }
+                        
+            }
+        }
+
+        public static void saveXMLReplacer(ref object o)
+        {
+            foreach (var serializer in PreSerializer.Keys)
+                try
+                {
+                    o = PreSerializer[serializer].Invoke(o);
+                }
+                catch(Exception e)
+                {
+                        _monitor.Log("Error during serialization: " + serializer.Name, LogLevel.Error);
+                        _monitor.Log(e.Message);
+                        _monitor.Log(e.StackTrace);
+                }
+        }
+
+        public static void saveXMLRebuilder(ref object __result)
+        {
+            foreach (var serializer in PostSerializer.Keys)
+                try
+                {
+                    __result = PostSerializer[serializer].Invoke(__result);
+                }
+                catch (Exception e)
+                {
+                  
+                        _monitor.Log("Error during serialization: " + serializer.Name, LogLevel.Error);
+                        _monitor.Log(e.Message);
+                        _monitor.Log(e.StackTrace);
+                }
+        }
+
+        public object Rebuilder(object __result)
+        {
+            if (SaveHandler.isRebuildable(__result))
+                return SaveHandler.rebuildElement(SaveHandler.getDataString(__result), __result);
+
+            return __result;
+        }
+
+        public object Replacer(object o)
+        { 
+            if (SaveHandler.hasSaveType(o))
+                return SaveHandler.getReplacement(o);
+
+            return o;
         }
 
         private void startResponder()
@@ -249,12 +928,14 @@ namespace PyTK
         {
             PyUtils.addEventPrecondition("hasmod", (key, values, location) =>
              {
-                 return LuaUtils.hasMod(values);
+                 string mod = values.Replace("hasmod ", "").Replace(" ", "");
+                 bool result = LuaUtils.hasMod(mod);
+                 return result;
              });
-
+            
             PyUtils.addEventPrecondition("switch", (key, values, location) =>
             {
-                return LuaUtils.switches(values);
+                return LuaUtils.switches(values.Replace("switch ", ""));
             });
 
             PyUtils.addEventPrecondition("npcxy", (key, values, location) =>
@@ -285,7 +966,7 @@ namespace PyTK
                     var stack = p.Length == 1 ? 1 : int.Parse(p[1]);
                     int count = 0;
 
-                    foreach(Item item in items)
+                    foreach (Item item in items)
                     {
                         if (item.Name == name)
                             count += item.Stack;
@@ -311,11 +992,29 @@ namespace PyTK
 
             PyUtils.addEventPrecondition("LC", (key, values, location) =>
             {
-                return PyUtils.checkEventConditions(values.Replace("%div","/"), location, location);
+                return PyUtils.checkEventConditions(values.Replace("%div", "/"), location, location);
             });
 
 
+        }       
+        private IEnumerable<string> GetObjectByNameTokenValue(string input)
+        {
+            string[] request = input.Split(':');
+            yield return
+                (request.Length >= 2) ?
+                PyTK.PyUtils.getItem(request[0], -1, request[1]) is StardewValley.Object obj ? obj.ParentSheetIndex.ToString() : "" :
+                PyTK.PyUtils.getItem("Object", -1, request[0]) is StardewValley.Object obj2 ? obj2.ParentSheetIndex.ToString() : "";
         }
+
+        private IEnumerable<string> GetLuaString(string input)
+        {
+            var script = PyLua.getNewScript();
+            script.Globals["result"] = "";
+                      script.DoString("result = (" + input + ")");
+            yield return (string)script.Globals["result"];
+        }
+
+
 
         private void registerTileActions()
         {
@@ -337,7 +1036,7 @@ namespace PyTK
                 List<string> text = action.Split(' ').ToList();
                 text.RemoveAt(0);
                 action = String.Join(" ", text);
-                return location.performAction(action, Game1.player, new Location((int)tile.X, (int)tile.Y));
+                return location.performAction(action, Game1.player, new xTile.Dimensions.Location((int)tile.X, (int)tile.Y));
             }).register();
 
             TileAction Lua = new TileAction("Lua", (action, location, tile, layer) =>
@@ -346,7 +1045,7 @@ namespace PyTK
                 if (a.Length > 2)
                     if (a[1] == "this")
                     {
-                        string id = location.Name + "." + layer + "." + tile.Y + tile.Y;
+                        string id = location.Name + "." + layer + "." + tile.X + "." + tile.Y + "." + a[2];
                         if (!PyLua.hasScript(id))
                         {
                             if (layer == "Map")
@@ -360,8 +1059,6 @@ namespace PyTK
 
                                     PyLua.loadScriptFromString(script, id);
                                 }
-                                else
-                                    PyLua.loadScriptFromString("Luau.log(\"Error: Could not find Lua property on Map.\")", id);
                             }
                             else
                             {
@@ -370,14 +1067,23 @@ namespace PyTK
                                 function callthis(location,tile,layer)
                                 " + lua + @"
                                 end", id);
-                                else
-                                    PyLua.loadScriptFromString("Luau.log(\"Error: Could not find Lua property on Tile.\")", id);
                             }
                         }
-                        PyLua.callFunction(id, "callthis", new object[] { location, tile, layer });
+
+                        if (PyLua.hasScript(id))
+                            PyLua.callFunction(id, "callthis", new object[] { location, tile, layer });
                     }
                     else
-                        PyLua.callFunction(a[1], a[2], new object[] { location, tile, layer });
+                    {
+                        try
+                        {
+                            PyLua.callFunction(a[1], a[2], new object[] { location, tile, layer });
+                        }
+                        catch
+                        {
+
+                        }
+                    }
                 return true;
             }).register();
 
@@ -497,6 +1203,28 @@ namespace PyTK
 
                 PyNet.syncLocationMapToAll(p[0]);
             }).register();
+        }
+
+        public static class GenericActionFactory
+        {
+            public static MethodInfo CreateMethodByParameter(Type parameterType, Action<object> action, bool result = false)
+            {
+                var createMethod = typeof(GenericActionFactory).GetMethod("CreateMethod")
+                    .MakeGenericMethod(parameterType);
+
+                var del = createMethod.Invoke(null, new object[] { action, result });
+
+                return (MethodInfo) del;
+            }
+            
+            public static MethodInfo CreateMethod<TEvent>(Action<object> action, bool result)
+            {
+
+                if(!result)
+                return (new Action<TEvent>((o) => action.Invoke(o))).GetMethodInfo();
+                else
+                    return new Action<TEvent>((__result) => action.Invoke(__result)).Method;
+            }
         }
     }
 }

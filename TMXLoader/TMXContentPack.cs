@@ -1,9 +1,14 @@
-﻿using System.Collections.Generic;
+﻿using StardewModdingAPI;
+using System.Collections.Generic;
 
 namespace TMXLoader
 {
     internal class TMXContentPack
     {
+        public List<string> hasMods { get; set; } = new List<string>();
+
+        public List<string> hasNotMods { get; set; } = new List<string>();
+        public List<string> alsoLoad { get; set; } = new List<string>();
         public List<MapEdit> addMaps { get; set; } = new List<MapEdit>();
         public List<MapEdit> replaceMaps { get; set; } = new List<MapEdit>();
         public List<MapEdit> mergeMaps { get; set; } = new List<MapEdit>();
@@ -15,5 +20,8 @@ namespace TMXLoader
         public List<NPCPlacement> festivalSpots { get; set; } = new List<NPCPlacement>();
         public List<NPCPlacement> placeNPCs { get; set; } = new List<NPCPlacement>();
         public List<string> scripts { get; set; } = new List<string>();
+        public bool loadLate { get; set; } = false;
+
+        internal IContentPack parent = null;
     }
 }

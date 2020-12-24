@@ -12,6 +12,9 @@ using System.Reflection;
 using OggSharp;
 using StardewModdingAPI.Events;
 using System.Threading;
+using Microsoft.Xna.Framework;
+using xTile;
+using xTile.ObjectModel;
 
 namespace CustomMusic
 {
@@ -23,20 +26,23 @@ namespace CustomMusic
         internal static IModHelper SHelper;
         internal static MethodInfo checkEventConditions = null;
         internal static Dictionary<string, string> locations = new Dictionary<string, string>();
-        internal static Config config;
+        internal static Dictionary<string, List<SoundEmitterPlacement>> emitterPlacements = new Dictionary<string, List<SoundEmitterPlacement>>();
+        public static Config config;
         internal static int loads = 0;
         internal static int simLoad = 0;
         internal static List<string> working = new List<string>();
         internal const int ti = 32;
         internal const int simuMax = 8;
         internal const int slp = 500;
-
+        internal List<ActiveMusic> CurrentEmitters = new List<ActiveMusic>();
+        public static SynthesizedSound Synth = new SynthesizedSound(form: WaveForm.Square, length: 15);
         public override void Entry(IModHelper helper)
         {
             config = helper.ReadConfig<Config>();
             SMonitor = Monitor;
             SHelper = Helper;
-            loadContentPacks();
+            Thread thread = new Thread(loadContentPacks);
+            thread.Start();
             var harmony = HarmonyInstance.Create("Platonymous.CustomMusic");
             harmony.Patch(typeof(Cue).GetMethod("Stop"), new HarmonyMethod(typeof(Overrides), "Stop"));
             harmony.Patch(typeof(Cue).GetMethod("Play"), new HarmonyMethod(typeof(Overrides), "Play"));
@@ -44,6 +50,9 @@ namespace CustomMusic
             harmony.Patch(typeof(Cue).GetMethod("SetVariable"), new HarmonyMethod(typeof(Overrides), "SetVariable"));
             harmony.Patch(typeof(Cue).GetProperty("IsPlaying").GetGetMethod(false), new HarmonyMethod(typeof(Overrides), "IsPlaying"));
             harmony.Patch(typeof(SoundBank).GetMethod("GetCue"), new HarmonyMethod(typeof(Overrides), "GetCue"));
+
+            foreach(var playCue in typeof(SoundBank).GetMethods().Where(m => m.Name == "PlayCue"))
+            harmony.Patch(playCue, new HarmonyMethod(typeof(Overrides), "PlayCue"));
 
             try
             {
@@ -61,8 +70,16 @@ namespace CustomMusic
             helper.ConsoleCommands.Add("playmusic", "Play a music cue. Format: playmusic [name]", (s, p) =>
               {
                   Monitor.Log("Playing: " + p[0], LogLevel.Info);
-                  Game1.nextMusicTrack = p[0];
+                  Game1.changeMusicTrack(p[0]);
               });
+
+            //helper.Events.Input.ButtonPressed += Input_ButtonPressed;
+        }
+
+        private void Input_ButtonPressed(object sender, ButtonPressedEventArgs e)
+        {
+            if (e.Button == SButton.Y)
+                Synth.Play();
         }
 
         private void OnDayStarted(object sender, DayStartedEventArgs e)
@@ -72,34 +89,92 @@ namespace CustomMusic
 
             var name = locations[Game1.currentLocation.Name];
 
-            if (name.StartsWith("cm:"))
+            if (name.ToLower().StartsWith("cm:"))
             {
                 string[] n = name.Split(':');
                 if (n.Length <= 2 && Game1.currentSong != null && Game1.currentSong.Name is string s && s.Length > 0)
                     name += ":" + s;
             }
 
-            DelayedAction d = new DelayedAction(500, () => Game1.nextMusicTrack = name);
+            DelayedAction d = new DelayedAction(500, () => Game1.changeMusicTrack(name));
             Game1.delayedActions.Add(d);
         }
 
         private void OnWarped(object sender, WarpedEventArgs e)
         {
-            if (e.NewLocation == null || !e.IsLocalPlayer)
+
+            if (!(e.NewLocation is GameLocation) || !e.IsLocalPlayer)
                 return;
+            CurrentEmitters.ForEach(a => a.Dispose());
+            CurrentEmitters.Clear();
 
-            if (locations.ContainsKey(e.NewLocation.Name))
+            if (locations.TryGetValue(e.NewLocation.Name, out string name))
             {
-                var name = locations[e.NewLocation.Name];
-
-                if (name.StartsWith("cm:"))
+                if (name.ToLower().StartsWith("cm:"))
                 {
                     string[] n = name.Split(':');
                     if (n.Length <= 2 && Game1.currentSong != null && Game1.currentSong.Name is string s && s.Length > 0)
                         name += ":" + s;
                 }
-                Game1.nextMusicTrack = name;
+                Game1.changeMusicTrack(name);
             }
+
+            if (emitterPlacements.TryGetValue(e.NewLocation.Name, out List<SoundEmitterPlacement> placements))
+            {
+                foreach(SoundEmitterPlacement emitter in placements.Where(p => CustomMusicMod.checkConditions(p.Conditions)))
+                {
+                    if (emitter.SoundId.ToLower().StartsWith("cm:"))
+                        emitter.SoundId = emitter.SoundId.Substring(3);
+
+                    var songs = CustomMusicMod.Music.Where(m => m.Id == emitter.SoundId && CustomMusicMod.checkConditions(m.Conditions)).ToList();
+                    if (songs.FirstOrDefault() is StoredMusic music)
+                    {
+                        var pos = emitter.GetPosition();
+                        ActiveMusic active = new ActiveMusic(emitter.SoundId + "_" + pos.X + "_" + pos.Y, music.Sound.CreateInstance(), music.Ambient, music.Loop, pos, emitter.DistanceModifier, emitter.VolumeModifier, emitter.MaxTileDistance);
+                        CurrentEmitters.Add(active);
+                    }
+                }
+            }
+
+            if(e.NewLocation.Map is Map map && map.Properties.TryGetValue("SoundEmitters", out PropertyValue emittersValue) 
+                && emittersValue != null 
+                && emittersValue.ToString() is string emittersText
+                && emittersText != "")
+            {
+                var emittersData = emittersText.Split(';');
+                foreach (string data in emittersData)
+                {
+                    if(data.Split(' ') is string[] emitter && emitter.Length >= 3 
+                        && float.TryParse(emitter[0], out float x)
+                        && float.TryParse(emitter[1], out float y)
+                        && emitter[2] is string aname)
+                    {
+                        float distance = SoundEmitterPlacement.DefaultDistanceModifier;
+                        float volume = SoundEmitterPlacement.DefaultVolumeModifier;
+                        int maxDistance = SoundEmitterPlacement.DefaultMaxDistance;
+
+                        if (aname.ToLower().StartsWith("cm:"))
+                            aname = aname.Substring(3);
+
+                        if (emitter.Length >= 4)
+                            float.TryParse(emitter[3], out distance);
+
+                        if (emitter.Length >= 5)
+                            float.TryParse(emitter[4], out volume);
+
+                        if (emitter.Length >= 6)
+                            int.TryParse(emitter[5], out maxDistance);
+
+                        var songs = CustomMusicMod.Music.Where(m => m.Id == aname && CustomMusicMod.checkConditions(m.Conditions)).ToList();
+                        if (songs.FirstOrDefault() is StoredMusic music)
+                        {
+                            ActiveMusic active = new ActiveMusic(aname + "_" + x + "_" + y, music.Sound.CreateInstance(), music.Ambient, music.Loop, new Vector2(x,y), distance, volume, maxDistance);
+                            CurrentEmitters.Add(active);
+                        }
+                    }
+                }
+            }
+
         }
 
         public static Type getTypeSDV(string type)
@@ -116,48 +191,95 @@ namespace CustomMusic
 
         private void loadContentPacks()
         {
-            loads = 0;
-            simLoad = 0;
+            List<string> ids = new List<string>();
+            List<string> files = new List<string>();
+
             foreach (IContentPack pack in Helper.ContentPacks.GetOwned())
             {
                 MusicContent content = pack.ReadJsonFile<MusicContent>("content.json");
-                loads += content.Music.Count;
-                foreach (MusicItem music in content.Music)
+                List<MusicItem> all = new List<MusicItem>();
+                all.AddRange(content.Music);
+                all.AddRange(content.Sounds);
+                all.AddRange(content.Emitters);
+                loads += all.Count;
+                foreach (MusicItem music in all)
                 {
                     string path = Path.Combine(pack.DirectoryPath, music.File);
-                    if (!music.Preload && !config.Convert)
-                        Task.Run(() =>
-                        {
-                            addMusic(path, music);
-                        });
-                    else if (!config.Convert)
-                        addMusic(path, music);
-                    else
-                    {
-                        while (simLoad > simuMax || working.Contains(path))
-                            Thread.Sleep(slp);
+                    addMusic(path, music);
+                    if (!ids.Contains(music.Id))
+                        ids.Add(music.Id);
 
-                        simLoad++;
-                        working.Add(path);
-                        Task.Run(() =>
-                        {
-                            addMusic(path, music);
-                        });
-                    }
-
+                    if (!files.Contains(Path.GetFileNameWithoutExtension(path)))
+                        files.Add(Path.GetFileNameWithoutExtension(path));
                 }
-                if (config.Convert)
-                    while(loads > 0)
-                        Thread.Sleep(slp);
 
                 foreach (LocationItem location in content.Locations)
                 {
-                    if (locations.ContainsKey(location.Location))
-                        locations.Remove(location.Location);
+                    if (location.MusicId != null && location.MusicId != "")
+                    {
+                        if (locations.ContainsKey(location.Location))
+                            locations.Remove(location.Location);
 
-                    locations.Add(location.Location, location.MusicId);
+                        locations.Add(location.Location, location.MusicId);
+                    }
+
+                    if (location.Emitters.Count > 0)
+                        if (!emitterPlacements.ContainsKey(location.Location))
+                            emitterPlacements.Add(location.Location, location.Emitters);
+                        else
+                            emitterPlacements[location.Location].AddRange(location.Emitters);
                 }
             }
+
+            List<GMCMOption> options = new List<GMCMOption>();
+
+            foreach(var id in ids)
+            {
+                List<string> choices = new List<string>() { "CM:Default", "Vanilla", "Random", "Any" };
+                
+                foreach(var file in files.OrderBy(f => f))
+                    choices.Add(Path.GetFileNameWithoutExtension(file));
+
+                int activeIndex = 0;
+
+                if (config.Presets.ContainsKey(id) && config.Presets[id] != "Default" && choices.Exists(c => c == config.Presets[id]))
+                    activeIndex = choices.IndexOf(config.Presets[id]);
+
+                choices[1] = choices[1] + ":" + id;
+
+                options.Add(new GMCMOption(id, choices, "", activeIndex));
+            }
+
+            if (options.Count == 0)
+                return;
+
+            GMCMConfig gmcmConfig = new GMCMConfig(ModManifest, (key, value) =>
+            {
+                if (key == "save" && value == "file")
+                {
+                    Helper.WriteConfig<Config>(config);
+                    return;
+                }
+
+                if (value == "CM:Default")
+                    value = "Default";
+
+                if (value.StartsWith("Vanilla:"))
+                    value = "Vanilla";
+
+                    if (!config.Presets.ContainsKey(key))
+                        config.Presets.Add(key, value);
+                    else
+                        config.Presets[key] = value;
+               
+
+            }, options, new GMCMLabel("Music Choices", "Default: Content packs. Random: Packs and vanilla mixed. Any: All mixed."));
+
+            while (!Context.IsGameLaunched)
+                Thread.Sleep(1);
+
+            if (gmcmConfig.register(Helper))
+                Monitor.Log("Added Custom Music Config to GMCM", LogLevel.Info);
         }
 
         private void addMusic(string path, MusicItem music)
@@ -166,46 +288,7 @@ namespace CustomMusic
             string oPath = path;
 
             string orgPath = path;
-            path = config.Convert ? path.Replace(".ogg", ".wav") : path;
-            bool done = false;
-            int cc = 0;
-            if (config.Convert)
-            {
-                while (!done && cc < ti)
-                {
-
-                    if (File.Exists(path))
-                    {
-                        FileStream file = File.Open(path, FileMode.Open);
-                        try
-                        {
-                            if (file.Length < 100)
-                            {
-                                file.Close();
-                                file.Dispose();
-                                File.Delete(path);
-                                Convert(orgPath);
-                            }
-                            else
-                            {
-                                file.Close();
-                                file.Dispose();
-                            }
-                        }
-                        catch
-                        {
-                            cc++;
-                            file.Close();
-                            file.Dispose();
-                            Thread.Sleep(slp);
-                        }
-                    }
-                    else
-                        Convert(orgPath);
-                    done = true;
-                }
-            }
-
+           
             SoundEffect soundEffect = LoadSoundEffect(path);
 
             if (soundEffect != null)
@@ -213,30 +296,21 @@ namespace CustomMusic
                 Monitor.Log(music.File + " Loaded", LogLevel.Trace);
                 string[] ids = music.Id.Split(',').Select(p => p.Trim()).ToArray();
                 foreach (string id in ids)
-                    Music.Add(new StoredMusic(id,music.Preload ? soundEffect :null, music.Ambient, music.Loop, music.Conditions, path));
+                    Music.Add(new StoredMusic(id, music.Preload ? soundEffect : null, music.Ambient, music.Loop, music.Conditions, path));
             }
             else
             {
                 Monitor.Log(music.File + " failed to load", LogLevel.Warn);
-                //Monitor.Log(path + ":" +le.Message + ":" + le.StackTrace, LogLevel.Trace);
             }
-
-            loads--;
-            simLoad--;
-            working.Remove(oPath);
         }
 
         public static SoundEffect LoadSoundEffect(string path)
         {
-            int c = 0;
-            Exception le = null;
             SoundEffect soundEffect = null;
 
 
             if (path.EndsWith(".wav"))
             {
-                while (soundEffect == null && c < ti)
-                {
                     FileStream stream = new FileStream(path, FileMode.Open);
                     try
                     {
@@ -245,30 +319,15 @@ namespace CustomMusic
                     catch (Exception e)
                     {
                         stream.Close();
-                        c++;
-                        le = e;
-                        Thread.Sleep(slp);
                     }
                     stream.Close();
                     stream.Dispose();
-                }
             }
             else
-            {
-                while (soundEffect == null && c < ti)
-                {
-                    try
-                    {
-                        soundEffect = OggLoader.Load(path);
-                    }
-                    catch (Exception e)
-                    {
-                        c++;
-                        le = e;
-                        Thread.Sleep(slp);
-                    }
-                }
-            }
+                soundEffect = OggLoader.Load(path);
+
+            if(soundEffect == null)
+                SMonitor?.Log("Failed to load: " + path, LogLevel.Error);
 
             return soundEffect;
         }
@@ -356,7 +415,7 @@ namespace CustomMusic
         {
             if (condition == null || condition == "")
                 return true;
-            
+
             GameLocation location = Game1.currentLocation;
             if (location == null)
                 location = Game1.getFarm();

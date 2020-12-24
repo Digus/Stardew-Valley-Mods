@@ -121,13 +121,14 @@ namespace PlanImporter
                 if (tile.type == "large-rock")
                     farm.addResourceClumpAndRemoveUnderlyingTerrain(752, 2, 2, pos);
 
-
+                if (!tile.type.StartsWith("large-") && building == null && obj == null && tf == null)
+                    Monitor.Log("Could not place tile: " + tile.type + " (unknown type)", LogLevel.Warn);
             }
         }
 
         public TerrainFeature getTerrainFeature(string type, Vector2 pos)
         {
-            switch (type)
+            switch (type.ToLower())
             {
                 case "wood-floor": return new Flooring(0);
                 case "stone-floor": return new Flooring(1);
@@ -190,13 +191,15 @@ namespace PlanImporter
                 case "yam": Crop yam = new Crop(492, (int)pos.X, (int)pos.Y); yam.growCompletely(); return new HoeDirt(0, yam);
                 case "grass": return new Grass(1, 4);
                 case "farmland": return new HoeDirt(0);
+                case "mushroom-tree": return new Tree(7, 5);
+                case "palm-tree": return new Tree(6, 5);
                 default: return null;
             }
         }
 
         public SObject getObject(string type, Vector2 pos)
         {
-            switch (type)
+            switch (type.ToLower())
             {
                 case "bee-hive": return new SObject(pos,10);
                 case "mayo": return new SObject(pos, 24);
@@ -230,13 +233,20 @@ namespace PlanImporter
                 case "campfire": return new SObject(pos, 146);
                 case "stone": return new SObject(pos, 449,1);
                 case "twig": return new SObject(pos,294, 1);
+                case "wood-sign": return new Sign(pos, 37);
+                case "stone-sign": return new Sign(pos, 38);
+                case "wood-chipper": return new SObject(pos, 211);
+                case "mini-jukebox": return new SObject(pos, 209);
+                case "mini-fridge": return new SObject(pos, 216);
+                case "workbench": return new SObject(pos, 208);
+                case "deluxe-scarecrow": return new SObject(pos, 167);
                 default: return null;
             }
         }
 
         public Building getBuilding(string type, Vector2 pos)
         {
-            switch (type)
+            switch (type.ToLower())
             {
                 case "silo": return new Building(new BluePrint("Silo"), pos);
                 case "mill": return new Mill(new BluePrint("Mill"), pos);
@@ -249,7 +259,13 @@ namespace PlanImporter
                 case "earth-obelisk": return new Building(new BluePrint("Earth Obelisk"), pos);
                 case "gold-clock": return new Building(new BluePrint("Gold Clock"), pos);
                 case "junimo-hut": return new JunimoHut(new BluePrint("Junimo Hut"), pos);
-                case "Shed": return new Building(new BluePrint("Shed"), pos);
+                case "shed": return new Building(new BluePrint("Shed"), pos);
+                case "shipping-bin": return new ShippingBin(new BluePrint("Shipping Bin"), pos);
+                case "stone-cabin": return new Building(new BluePrint("Stone Cabin"), pos);
+                case "plank-cabin": return new Building(new BluePrint("Plank Cabin"), pos);
+                case "log-cabin": return new Building(new BluePrint("Log Cabin"), pos);
+                case "fish-pond": return new FishPond(new BluePrint("Fish Pond"), pos);
+                case "desert-obelisk": return new Building(new BluePrint("Desert Obelisk"), pos);
                 default: return null;
             }
         }

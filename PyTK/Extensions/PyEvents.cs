@@ -247,8 +247,8 @@ namespace PyTK.Extensions
             EventHandler<MenuChangedEventArgs> d = delegate (object sender, MenuChangedEventArgs e)
             {
                 ShopMenu shop = (ShopMenu)e.NewMenu;
-                List<Item> forSale = shop.getForSale();
-                Dictionary<Item, int[]> priceAndStock = shop.getItemPriceAndStock();
+                List<ISalable> forSale = shop.getForSale();
+                Dictionary<ISalable, int[]> priceAndStock = shop.getItemPriceAndStock();
                 forSale = forSale.Union(inventory.forSale()).ToList();
                 priceAndStock = priceAndStock.Union(inventory.priceAndStock()).ToDictionary(dict => dict.Key, dict => dict.Value);
             };
@@ -294,8 +294,8 @@ namespace PyTK.Extensions
             EventHandler<MenuChangedEventArgs> d = delegate (object sender, MenuChangedEventArgs e)
             {
                 ShopMenu shop = (ShopMenu)e.NewMenu;
-                List<Item> forSale = shop.getForSale();
-                Dictionary<Item, int[]> priceAndStock = shop.getItemPriceAndStock();
+                List<ISalable> forSale = shop.getForSale();
+                Dictionary<ISalable, int[]> priceAndStock = shop.getItemPriceAndStock();
                 forSale.AddOrReplace(inventory.item);
                 priceAndStock.AddOrReplace(inventory.item, new int[] { inventory.price, inventory.stock });
             };
@@ -318,6 +318,22 @@ namespace PyTK.Extensions
         {
             return item.addToShop((shop) => shop.portraitPerson is NPC npc && npc.Name == shopkeeper && PyUtils.CheckEventConditions(conditions));
         }
+
+        /// <summary>Generates a method that adds this inventory to all shops in a specific location <see cref="IDisplayEvents.MenuChanged"/>.</summary>
+        /// <returns>Returns the method.</returns>
+        public static EventHandler<MenuChangedEventArgs> addToLocationShop(this InventoryItem item, GameLocation location, string conditions = "")
+        {
+            return item.addToShop((shop) => Game1.currentLocation is GameLocation l && l == location && PyUtils.CheckEventConditions(conditions));
+        }
+
+        /// <summary>Generates a method that adds this inventory to all shops in a specific location <see cref="IDisplayEvents.MenuChanged"/>.</summary>
+        /// <returns>Returns the method.</returns>
+        public static EventHandler<MenuChangedEventArgs> addToLocationShop(this InventoryItem item, string location, string conditions = "")
+        {
+            return item.addToShop((shop) => Game1.currentLocation is GameLocation l && l.Name == location && PyUtils.CheckEventConditions(conditions));
+        }
+
+       
 
         /// <summary>Generates a method that adds this inventory to the furniture catalogue and adds it to <see cref="IDisplayEvents.MenuChanged"/>.</summary>
         /// <returns>Returns the method.</returns>

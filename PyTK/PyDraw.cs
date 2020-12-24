@@ -4,9 +4,6 @@ using PyTK.Extensions;
 using StardewValley;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace PyTK
 {
@@ -51,6 +48,45 @@ namespace PyTK
                     t = t % textureColors.Count;
 
                 return textureColors[t][y2 * tWidth + x2];
+            });
+        }
+
+        public static Texture2D getPatterns(int width, int height, params Texture2D[] textures)
+        {
+            List<Color[]> textureColors = new List<Color[]>();
+            int tWidth = textures[0].Width;
+            int tHeight = textures[0].Height;
+
+            foreach (Texture2D texture in textures)
+            {
+                int iWidth = texture.Width;
+                int iHeight = texture.Height;
+                Color[] colors = new Color[iWidth * iHeight];
+                texture.GetData(colors);
+                textureColors.Add(colors);
+            }
+
+            int tpw = width / tWidth;
+            int tph = height / tHeight;
+
+            int n = tpw * tph;
+
+            List<Color[]> placements = new List<Color[]>();
+            int j = 0;
+            for (int i = 0; i < n; i++) {
+                placements.Add(textureColors[j]);
+                j++;
+                if (j >= textureColors.Count)
+                    j = 0;
+            }
+            return getRectangle(width, height, (x, y, w, h) =>
+            {
+                int t = (x / tWidth) + ((y / tHeight) * (tpw));
+
+                int xt = x % tWidth;
+                int yt = y % tHeight;
+
+                return placements[t][yt * tWidth + xt];
             });
         }
 

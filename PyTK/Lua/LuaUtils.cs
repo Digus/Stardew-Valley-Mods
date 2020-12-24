@@ -6,8 +6,11 @@ using StardewValley.Minigames;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using TMXTile;
 using xTile;
+using xTile.Layers;
 using xTile.ObjectModel;
+using xTile.Tiles;
 using SObject = StardewValley.Object;
 
 
@@ -25,11 +28,7 @@ namespace PyTK.Lua
 
         public static bool hasMod(string mod)
         {
-            foreach (var m in Helper.ModRegistry.GetAll())
-                if (m.Manifest.UniqueID.Equals(mod))
-                    return true;
-
-            return false;
+            return Helper.ModRegistry.IsLoaded(mod);
         }
 
         public static int setCounter(string id, int value)
@@ -56,6 +55,23 @@ namespace PyTK.Lua
                 PyTKMod.syncCounter(id, dif);
 
             return PyTKMod.saveData.Counters[id];
+        }
+
+        public static object getInstance(string type, params object[] args)
+        {
+           return Activator.CreateInstance(Type.GetType(type),args);
+        }
+        public object callStaticMethod(Type type, string method, params object[] args)
+        {
+            if (type.GetMethod(method, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic) is MethodInfo methodInfo)
+                return methodInfo.Invoke(null, args);
+            else
+                return false;
+        }
+
+        public object callStaticMethod(string typeName, string method, params object[] args)
+        {
+           return callStaticMethod(Type.GetType(typeName),method,args);
         }
 
         public static bool invertSwitch(string id)
@@ -144,7 +160,7 @@ namespace PyTK.Lua
             location.warps.Clear();
             PropertyValue p = "";
             if (location.Map.Properties.TryGetValue("Warp", out p) && p != "")
-                Helper.Reflection.GetMethod(location, "updateWarps").Invoke();
+                location.updateWarps();
         }
 
         public static bool setGameValue(string field, object value, int delay = 0, object root = null)
@@ -227,5 +243,58 @@ namespace PyTK.Lua
                 return new SObject(Vector2.Zero, index);
             return new SObject(index, 1);
         }
+
+        public static Color? getColorFromProperty(Map map, string property)
+        {
+            if (map.Properties.ContainsKey(property) && TMXColor.FromString(map.Properties[property]) is TMXColor color)
+                return color.toColor();
+
+            return null;
+        }
+
+        public static Color? getColorFromProperty(Layer layer, string property)
+        {
+            if (layer.Properties.ContainsKey(property) && TMXColor.FromString(layer.Properties[property]) is TMXColor color)
+                return color.toColor();
+
+            return null;
+        }
+
+        public static Color? getColorFromProperty(Tile tile, string property)
+        {
+            if (tile.Properties.ContainsKey(property) && TMXColor.FromString(tile.Properties[property]) is TMXColor color)
+                return color.toColor();
+
+            return null;
+        }
+
+        public static Color getColor(int r, int g, int b, int a)
+        {
+            return new Color(r, g, b, a);
+        }
+
+        public static void setColorProperty(Tile tile, Color color, string property)
+        {
+            tile.Properties[property] = color.toTMXColor().ToString();
+        }
+
+        public static void setColorProperty(Layer layer, Color color, string property)
+        {
+            layer.Properties[property] = color.toTMXColor().ToString();
+        }
+
+        public static void setColorProperty(Map map, Color color, string property)
+        {
+            map.Properties[property] = color.toTMXColor().ToString();
+        }
+
+        public static Color safeColor(Color? color)
+        {
+            if (color.HasValue)
+                return color.Value;
+
+            return Color.White;
+        }
+
     }
 }

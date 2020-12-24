@@ -1,6 +1,9 @@
 ﻿using Harmony;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using PyTK.ConsoleCommands;
 using PyTK.CustomElementHandler;
+using PyTK.Extensions;
 using PyTK.Types;
 using StardewModdingAPI;
 using StardewValley;
@@ -10,10 +13,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-using System.Linq;
-using PyTK.Extensions;
-using xTile;
-using xTile.ObjectModel;
 
 namespace PyTK.Overrides
 {
@@ -23,19 +22,50 @@ namespace PyTK.Overrides
         internal static IMonitor Monitor { get; } = PyTKMod._monitor;
         internal static Dictionary<int, Rectangle> rectangleCache = new Dictionary<int, Rectangle>();
         internal static Dictionary<string, Func<string, string, GameLocation, bool>> eventConditions = new Dictionary<string, Func<string,string, GameLocation, bool>>();
+        internal static bool skip = false;
+
+
+        public static void GameLocationConstructor(GameLocation __instance)
+        {
+            if (__instance.map is xTile.Map map)
+            {
+                if (map.Properties.ContainsKey("IsGreenHouse") || map.Properties.ContainsKey("IsGreenhouse"))
+                    __instance.IsGreenhouse = true;
+
+                if (map.Properties.ContainsKey("IsStructure"))
+                    __instance.isStructure.Value = true;
+
+                if (map.Properties.ContainsKey("IsFarm"))
+                    __instance.IsFarm = true;
+            }
+        } 
 
         [HarmonyPatch]
         internal class GLBugFix
         {
             internal static MethodInfo TargetMethod()
             {
-                return AccessTools.Method(PyUtils.getTypeSDV("GameLocation"), "Equals",new[] { PyUtils.getTypeSDV("GameLocation") });
+                return AccessTools.Method(PyUtils.getTypeSDV("GameLocation"), "Equals", new[] { PyUtils.getTypeSDV("GameLocation") });
             }
 
             internal static bool Prefix(GameLocation __instance, GameLocation other, ref bool __result)
             {
-                __result = object.Equals((object)__instance.Name, (object)other.Name) && object.Equals((object)__instance.uniqueName.Value, (object)other.uniqueName.Value ) && object.Equals((object)__instance.isStructure.Value, (object)other.isStructure.Value);
-                return false;
+                try
+                {
+                    if (__instance == null)
+                        return other == null;
+
+                    __result =
+                        other != null
+                        && object.Equals(__instance.Name, other.Name)
+                        && object.Equals(__instance.uniqueName.Value, other.uniqueName.Value)
+                        && object.Equals(__instance.isStructure.Value, (object)other.isStructure.Value);
+                    return false;
+                }
+                catch
+                {
+                    return true;
+                }
             }
         }
         [HarmonyPatch]
@@ -46,10 +76,10 @@ namespace PyTK.Overrides
                 return AccessTools.Method(PyUtils.getTypeSDV("GameLocation"), "checkEventPrecondition");
             }
 
-            internal static bool Prefix(GameLocation __instance, ref string precondition,ref bool __result)
+            internal static bool Prefix(GameLocation __instance, ref string precondition,ref int __result)
             {
-                string t = "M " + (Game1.player.money - 1);
-                string f = "M " + (Game1.player.money + 1);
+                string t = "M " + (Game1.player.Money - 1);
+                string f = "M " + (Game1.player.Money + 1);
 
                 foreach(var entry in eventConditions)
                 {
@@ -73,7 +103,7 @@ namespace PyTK.Overrides
                                 else
                                 {
                                     conditions[i] = f;
-                                    __result = false;
+                                    __result = -1;
                                     return false;
                                 }
 
@@ -131,7 +161,7 @@ namespace PyTK.Overrides
             {
                 string conditions = __instance.doesTileHaveProperty(xTile, yTile, "Conditions", "Buildings");
                 string fallback = __instance.doesTileHaveProperty(xTile, yTile, "Fallback", "Buildings");
-               
+
                 if (__instance.doesTileHaveProperty(xTile, yTile, "Action", "Buildings") is string action)
                     if (TileAction.getCustomAction(action, conditions, fallback) != null)
                         Game1.isInspectionAtCurrentCursorTile = true;
@@ -183,10 +213,13 @@ namespace PyTK.Overrides
                 return AccessTools.Method(PyUtils.getTypeSDV("Game1"), "getLocationRequest");
             }
 
-            internal static void Prefix(string locationName, bool isStructure = false)
+            internal static void Prefix(ref string locationName, bool isStructure = false)
             {
-                if (locationName == null || isStructure)
+                if (!locationName.Contains(":") || locationName == null || isStructure)
                     return;
+
+                string locationMap = Path.Combine("Maps", locationName.Split(':')[0]);
+                locationName = locationMap + "_" + locationName.Split(':')[1];
 
                 GameLocation location = null;
                 try
@@ -200,21 +233,21 @@ namespace PyTK.Overrides
 
                 if (location == null)
                 {
-
-                    string locationMap = Path.Combine("Maps", locationName);
-
-                    if (locationName.Contains(":"))
+                    try
                     {
-                        locationMap = Path.Combine("Maps", locationName.Split(':')[0]);
-                        locationName = locationMap + "_" + locationName.Split(':')[1];
+                        if (locationName.Contains("FarmHouse"))
+                            Game1.locations.Add(new FarmHouse(locationMap, locationName));
+                        else if (locationName.Contains("Farm"))
+                            Game1.locations.Add(new Farm(locationMap, locationName));
+                        else if (locationName.Contains("FarmCave"))
+                            Game1.locations.Add(new FarmCave(locationMap, locationName));
+                        else
+                            Game1.locations.Add(new GameLocation(locationMap, locationName));
                     }
+                    catch
+                    {
 
-                    if (locationName.Contains("FarmHouse"))
-                        Game1.locations.Add(new FarmHouse(locationMap, locationName));
-                    else if (locationName.Contains("Farm"))
-                        Game1.locations.Add(new Farm(locationMap, locationName));
-                    else
-                        Game1.locations.Add(new GameLocation(locationMap, locationName));
+                    }
                 }
             }
         }

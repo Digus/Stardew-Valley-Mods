@@ -1,7 +1,7 @@
 ﻿using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
+using StardewValley;
 using System.Collections.Generic;
-using xTile;
 
 namespace TMXLoader
 {
@@ -12,13 +12,16 @@ namespace TMXLoader
         public List<TileShopItem> buildItems { get; set; } = new List<TileShopItem>();
         public string iconFile { get; set; }
         public int[] exitTile { get; set; } = new int[] { 0, 0 };
-
         public string set { get; set; } = "Others";
         public int price { get; set; } = 10000;
 
         internal Texture2D _icon = null;
         internal string _mapName = null;
         internal string _location = null;
+
+        public List<string> tags { get; set; } = new List<string>();
+
+        public Dictionary<string, BuildableTranslation> translations { get; set; } = new Dictionary<string, BuildableTranslation>();
 
         public BuildableEdit()
         {
@@ -49,6 +52,7 @@ namespace TMXLoader
             b.sourceArea = sourceArea;
             b.type = type;
             b._map = _map;
+            b.tags = tags;
             return b;
         }
     }

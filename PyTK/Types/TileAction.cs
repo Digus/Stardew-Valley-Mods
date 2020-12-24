@@ -61,8 +61,11 @@ namespace PyTK.Types
         {
             bool result = true;
             string[] tileActions = actionString.Split(';');
+
             foreach (string action in tileActions)
             {
+                PyTKMod._monitor.Log("InvokeAction:" + action, StardewModdingAPI.LogLevel.Trace);
+
                 string nextAction = action.Replace(" § ", "§");
                 if (nextAction.Contains("§"))
                 {
@@ -94,6 +97,8 @@ namespace PyTK.Types
 
         public static bool invokeCustomTileActions(string key, GameLocation location, Vector2 tile, string layer)
         {
+            tile = new Vector2((int)tile.X, (int)tile.Y);
+
             bool standartAction = (key == "Action" || key == "TouchAction");
             bool mapAction = (layer == "Map");
             string conditions = standartAction ? location.doesTileHaveProperty((int)tile.X, (int)tile.Y, "Conditions", layer) : mapAction ? location.map.Properties.ContainsKey("Conditions") ? location.map.Properties["Conditions"].ToString() : "" :"";

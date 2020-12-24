@@ -14,12 +14,14 @@ namespace PyTK.CustomTV
         internal static IModHelper Helper { get => PyTKMod._helper; }
         internal static IMonitor Monitor { get => PyTKMod._monitor; }
 
-        private static string weatherString { get; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13105");
-        private static string fortuneString { get; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13107");
-        private static string queenString { get; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13114");
-        private static string landString { get; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13111");
-        private static string rerunString { get; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13117");
+        private static string weatherString { get; set; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13105");
+        private static string fortuneString { get; set; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13107");
+        private static string queenString { get; set; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13114");
+        private static string landString { get; set; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13111");
+        private static string rerunString { get; set; } = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13117");
         private static bool hasLoaded = false;
+
+        internal static bool changed = false;
 
         private static TemporaryAnimatedSprite tvScreen
         {
@@ -47,9 +49,10 @@ namespace PyTK.CustomTV
 
         private static TV tv;
 
+        private static int channelsPerPage = (Constants.TargetPlatform == GamePlatform.Android) ? 3 : 8;
         private static int currentpage = 0;
         private static List<List<Response>> pages = new List<List<Response>>();
-        private static Dictionary<string, TVChannel> channels = new Dictionary<string, TVChannel>();
+        internal static Dictionary<string, TVChannel> channels = new Dictionary<string, TVChannel>();
 
         internal static void load()
         {
@@ -57,6 +60,17 @@ namespace PyTK.CustomTV
                 loadDefaultChannels();
 
             hasLoaded = true;
+        }
+
+        internal static void reloadStrings()
+        {
+            weatherString = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13105");
+            fortuneString = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13107");
+            queenString = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13114");
+            landString = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13111");
+            rerunString = Game1.content.LoadString("Strings\\StringsFromCSFiles:TV.cs.13117");
+
+            loadDefaultChannels();
         }
 
         private static void loadDefaultChannels()
@@ -126,9 +140,7 @@ namespace PyTK.CustomTV
             {
                 if (defaults.Contains(id)) { continue; }
 
-                responses.Add(new Response(id, channels[id].text));
-
-                if (responses.Count > 7)
+                if (responses.Count >= channelsPerPage)
                 {
                     if (!responses.Contains(more))
                         responses.Add(more);
@@ -140,6 +152,7 @@ namespace PyTK.CustomTV
                     responses = new List<Response>();
                 }
 
+                responses.Add(new Response(id, channels[id].text));
             }
 
             if (!responses.Contains(leave))
@@ -152,34 +165,44 @@ namespace PyTK.CustomTV
             Game1.player.Halt();
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void addChannel(string id, string name, Action<TV, TemporaryAnimatedSprite, SFarmer, string> action)
         {
             channels.AddOrReplace(id, new TVChannel(id, name, action));
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void addChannel(TVChannel tvChannel)
         {
+            changed = true;
             channels.AddOrReplace(tvChannel.id, tvChannel);
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void changeAction(string id, Action<TV, TemporaryAnimatedSprite, SFarmer, string> action)
         {
+            changed = true;
             load();
             if (channels.ContainsKey(id))
                 channels[id].action = action;
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void removeChannel(string key)
         {
+            changed = true;
             removeKey(key);
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void removeKey(string key)
         {
+            changed = true;
             load();
             channels.Remove(key);
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void showProgram(TemporaryAnimatedSprite sprite, string text, Action afterDialogues = null, TemporaryAnimatedSprite overlay = null)
         {
             if (tv == null)
@@ -197,6 +220,7 @@ namespace PyTK.CustomTV
             Game1.afterDialogues = new Game1.afterFadeFunction(afterDialogues);
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void showProgram(TVChannel tvChannel)
         {
             if (tv == null)
@@ -211,11 +235,13 @@ namespace PyTK.CustomTV
             Game1.afterDialogues = new Game1.afterFadeFunction(tvChannel.afterDialogues);
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void showProgram(string id)
         {
             showProgram(channels[id]);
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void endProgram()
         {
             if (tv != null)
@@ -223,13 +249,14 @@ namespace PyTK.CustomTV
             tv = null;
         }
 
+        [ObsoleteAttribute("Will be removed. Use PlatoTK instead.", false)]
         public static void selectChannel(SFarmer who, string answer)
         {
             string a = answer.Split(' ')[0];
             Monitor.Log("Select Channel:" + a, LogLevel.Trace);
 
             if (a == "more")
-                showChannels(currentpage + 1);
+                PyUtils.setDelayedAction (0, () => showChannels(currentpage + 1));
             else if (channels.ContainsKey(a))
                 channels[a].action.Invoke(tv, tvScreen, who, a);
         }

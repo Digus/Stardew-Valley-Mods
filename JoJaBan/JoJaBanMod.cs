@@ -31,7 +31,7 @@ namespace JoJaBan
         public override void Entry(IModHelper helper)
         {
             SHelper = helper;
-            maxLevel = Directory.GetFiles(Path.Combine(Helper.DirectoryPath, "Level"), "*.tmx", SearchOption.AllDirectories).Count();
+            maxLevel = Directory.GetFiles(Path.Combine(Helper.DirectoryPath, "assets", "levels"), "*.tmx", SearchOption.AllDirectories).Count();
 
             TileAction exitAction = new TileAction("JoJaBan.Exit", exitGame);
             exitAction.register();
@@ -40,11 +40,21 @@ namespace JoJaBan
 
             helper.Events.GameLoop.GameLaunched += (o, e) =>
             {
-                arcadeTexture = helper.Content.Load<Texture2D>(@"Assets/arcade.png");
+                arcadeTexture = helper.Content.Load<Texture2D>(@"assets/arcade.png");
                 arcadeData = new CustomObjectData("JoJaBan", "JoJaBan/0/-300/Crafting -9/Play 'JoJaBan by Platonymous' at home!/true/true/0/JoJaBan", arcadeTexture, Color.White, bigCraftable: true, type: typeof(JoJaBanMachine));
                 Texture2D townInterior = Helper.Content.Load<Texture2D>(@"Maps/townInterior", ContentSource.GameContent);
                 boxTexture = townInterior.getArea(new Rectangle(304, 1024, 16, 32));
                 boxData = new CustomObjectData("JoJa Box", "JoJa Box/0/-300/Crafting -9/JoJa Box/true/true/0/JoJa Box", boxTexture, Color.White, bigCraftable: true, type: typeof(JoJaBox));
+                
+                if (Helper.ModRegistry.GetApi<IMobilePhoneApi>("aedenthorn.MobilePhone") is IMobilePhoneApi api)
+                {
+                    Texture2D appIcon = Helper.Content.Load<Texture2D>(Path.Combine("assets", "mobile_app_icon.png"));
+                    bool success = api.AddApp(Helper.ModRegistry.ModID + "MobileJoJaBan", "JoJaBan", () =>
+                    {
+                        startGame("", null, Vector2.Zero, "");
+                    }, appIcon);
+                }
+
             };
             helper.Events.Input.ButtonPressed += OnButtonPressed;
             helper.Events.GameLoop.SaveLoaded += (o, e) => addToCatalogue();
@@ -115,7 +125,7 @@ namespace JoJaBan
                 return;
             }
 
-            Map level = TMXContent.Load(Path.Combine("Level", $"level{l}.tmx"), SHelper);
+            Map level = TMXContent.Load(Path.Combine("assets", "levels", $"level{l}.tmx"), SHelper);
             string[] start = ((string)level.Properties["Start"]).Split(',');
             Vector2 startPos = new Vector2(int.Parse(start[0]), int.Parse(start[1]));
 

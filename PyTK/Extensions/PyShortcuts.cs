@@ -7,6 +7,8 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
+using System.Reflection;
+using System.Linq;
 
 namespace PyTK.Extensions
 {
@@ -16,6 +18,80 @@ namespace PyTK.Extensions
         internal static IMonitor Monitor { get; } = PyTKMod._monitor;
 
         /* Input */
+
+
+        public static object GetFieldValue (this object obj, string field, bool isStatic = false)
+        {
+            Type t = obj is Type ? (Type)obj : obj.GetType();
+            if (obj is Type)
+                isStatic = true;
+            return t.GetField(field, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(isStatic ? null : obj);
+        }
+
+        public static T GetFieldValue<T>(this object obj, string field, bool isStatic = false)
+        {
+            Type t = obj is Type ? (Type)obj : obj.GetType();
+            if (obj is Type)
+                isStatic = true;
+            return (T) t.GetField(field, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(isStatic ? null : obj);
+        }
+
+        public static void SetFieldValue(this object obj, object value, string field, bool isStatic = false)
+        {
+            Type t = obj is Type ? (Type)obj : obj.GetType();
+            if (obj is Type)
+                isStatic = true;
+            t.GetField(field, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.SetValue(isStatic ? null : obj, value);
+        }
+
+        public static object GetPropertyValue(this object obj, string property, bool isStatic = false)
+        {
+            Type t = obj is Type ? (Type)obj : obj.GetType(); 
+            if (obj is Type)
+                isStatic = true;
+            return t.GetProperty(property, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(isStatic ? null : obj);
+        }
+
+               public static void SetPropertyValue(this object obj, object value, string property, bool isStatic = false)
+        {
+            if (obj is Type)
+                isStatic = true;
+            Type t = obj is Type ? (Type) obj : obj.GetType();
+            t.GetProperty(property, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.SetValue(isStatic ? null : obj, value);
+        }
+
+        public static void CallAction(this object obj, string action, params object[] args)
+        {
+            bool isStatic = false;
+
+            Type t = obj is Type ? (Type)obj : obj.GetType();
+            if (obj is Type)
+                isStatic = true;
+            t.GetMethod(
+                action,
+                BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                Type.DefaultBinder,
+                args.Select(o => o.GetType()).ToArray(),
+                new ParameterModifier[0])
+                ?.Invoke(isStatic ? null : obj, args);
+        }
+
+        public static T CallFunction<T>(this object obj, string action, params object[] args)
+        {
+            bool isStatic = false;
+            if (obj is Type)
+                isStatic = true;
+
+            Type t = obj is Type ? (Type)obj : obj.GetType();
+
+            return (T)t.GetMethod(
+                            action,
+                            BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                            Type.DefaultBinder,
+                            args.Select(o => o.GetType()).ToArray(),
+                            new ParameterModifier[0])
+                            ?.Invoke(isStatic ? null : obj, args);
+        }
 
         public static bool isDown(this Keys k)
         {
@@ -106,6 +182,14 @@ namespace PyTK.Extensions
         public static Color toColor(this Vector4 vec)
         {
             return new Color(vec.X, vec.Y, vec.Z, vec.W);
+        }
+
+        public static Color? toColor(this string name)
+        {
+            if (typeof(Color).GetProperty(name) is PropertyInfo prop)
+                return (Color) prop.GetValue(null);
+
+            return null;
         }
 
         public static int toInt(this string t)
